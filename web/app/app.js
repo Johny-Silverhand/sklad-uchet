@@ -6,11 +6,14 @@ function openItemDialog(item) {
   $("#fId").value = item?.id || "";
   $("#fName").value = item?.name || "";
   $("#fKind").value = item?.kind || "zapchast";
+  $("#fStorage").value = item?.storage || currentStorage;
   $("#fQty").value = item?.quantity ?? 0;
   $("#fMin").value = item?.min_qty ?? 0;
   $("#fCell").value = item?.cell || "";
   $("#fSku").value = item?.sku || "";
   $("#fNotes").value = item?.notes || "";
+  fillThemeSelects();
+  $("#fTheme").value = item?.theme_id ? String(item.theme_id) : "";
   $("#btnSave").textContent = "Сохранить";
   $("#itemDialog").showModal();
   $("#fName").focus();
@@ -19,14 +22,17 @@ function openItemDialog(item) {
 async function saveItem(ev) {
   ev.preventDefault();
   const id = $("#fId").value;
+  const themeVal = $("#fTheme").value;
   const payload = {
     name: $("#fName").value,
     kind: $("#fKind").value,
+    storage: $("#fStorage").value,
     quantity: Number($("#fQty").value) || 0,
     min_qty: Number($("#fMin").value) || 0,
     cell: $("#fCell").value,
     sku: $("#fSku").value,
     notes: $("#fNotes").value,
+    theme_id: themeVal ? Number(themeVal) : null,
     force: forceSave,
   };
   try {
@@ -53,10 +59,18 @@ async function saveItem(ev) {
   }
 }
 
-function confirmDelete(id, name) {
+function confirmDelete(id, name, kindLabel = "позицию") {
   return new Promise((resolve) => {
-    $("#confirmTitle").textContent = "Удалить позицию?";
-    $("#confirmText").textContent = `«${name}» будет удалена безвозвратно.`;
+    $("#confirmTitle").textContent = "Удалить " + kindLabel + "?";
+    $("#confirmText").textContent = `«${name}» будет удалена. Позиции темы перейдут в «Без темы».`.replace(
+      kindLabel === "тему" ? "" : " Позиции темы перейдут в «Без темы».",
+      kindLabel === "тему" ? " Позиции темы перейдут в «Без темы»." : ""
+    );
+    if (kindLabel === "позицию") {
+      $("#confirmText").textContent = `«${name}» будет удалена безвозвратно.`;
+    } else {
+      $("#confirmText").textContent = `Тема «${name}» будет удалена. Позиции перейдут в «Без темы».`;
+    }
     $("#confirmYes").textContent = "Удалить";
     const dlg = $("#confirmDialog");
     const onYes = () => { cleanup(); resolve(true); };
@@ -93,7 +107,7 @@ async function loadDuplicates() {
             <input type="radio" name="pri-${escapeHtml(g.normalized_name)}" value="${it.id}" ${idx === 0 ? "checked" : ""} />
             <div>
               <strong>${escapeHtml(it.name)}</strong>
-              <div class="muted">${KIND_LABEL[it.kind] || it.kind} · ячейка ${escapeHtml(it.cell) || "—"} · SKU ${escapeHtml(it.sku) || "—"} · мин ${it.min_qty || 0}</div>
+              <div class="muted">${KIND_LABEL[it.kind] || it.kind} · ${STORAGE_LABEL[it.storage] || it.storage} · ${escapeHtml(it.theme_name || "Без темы")} · ячейка ${escapeHtml(it.cell) || "—"}</div>
             </div>
             <div><strong>${it.quantity}</strong></div>
             <div class="muted">#${it.id}</div>
@@ -121,4 +135,13 @@ async function loadDuplicates() {
     });
     box.appendChild(card);
   }
+}
+
+function openThemeDialog(theme) {
+  $("#themeDlgTitle").textContent = theme ? "Переименовать тему" : "Новая тема";
+  $("#thId").value = theme?.id || "";
+  $("#thName").value = theme?.name || "";
+  $("#thSort").value = theme?.sort_order ?? 0;
+  $("#themeDialog").showModal();
+  $("#thName").focus();
 }

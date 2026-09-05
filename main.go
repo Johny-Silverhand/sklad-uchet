@@ -22,7 +22,7 @@ var webFS embed.FS
 const (
 	appName     = "Склад Учёт"
 	appExeName  = "SkladUchet"
-	appVersion  = "1.2.1"
+	appVersion  = "1.2.2"
 	publisher   = "Victimok Labs"
 	uninstID    = "VictimokLabsSkladUchet"
 	creditLine  = "Разработано в Victimok Labs"
@@ -30,6 +30,16 @@ const (
 )
 
 func main() {
+	runtime.LockOSThread()
+	defer func() {
+		if rec := recover(); rec != nil {
+			msg := fmt.Sprintf("Сбой запуска: %v\n\nПодробности: %%APPDATA%%\\VictimokLabs\\SkladUchet\\launch.log", rec)
+			logLaunch("panic: %v", rec)
+			showError(appName, msg)
+			os.Exit(1)
+		}
+	}()
+
 	mode := detectMode(os.Args[1:])
 	argsForFlags := filterModeFlags(os.Args)
 	flagSet := flag.NewFlagSet(appExeName, flag.ContinueOnError)
@@ -59,11 +69,15 @@ func main() {
 	if mode == "app" {
 		store, err = OpenStore()
 		if err != nil {
-			fatal("База данных: " + err.Error())
+			logLaunch("OpenStore: %v", err)
+			fatal("Не удалось открыть базу данных:\n" + err.Error() + "\n\nПуть: %APPDATA%\\VictimokLabs\\SkladUchet\\sklad.db")
 			return
 		}
 		defer store.Close()
 		(&api{store: store}).mount(mux)
+		logLaunch("mode=app db=%s", store.DBPath())
+	} else {
+		logLaunch("mode=%s", mode)
 	}
 
 	sub, err := fs.Sub(webFS, "web")
@@ -100,22 +114,30 @@ func main() {
 
 	if !*noBrowser {
 		if runtime.GOOS == "windows" {
+			logLaunch("webview url=%s", startURL)
 			used := runNativeWindow(startURL, mode)
-			_ = srv.Close()
 			if used {
+				_ = srv.Close()
 				return
 			}
-			fmt.Fprintln(os.Stderr, "WebView2 недоступен — запасной запуск окна")
+			logLaunch("webview unavailable, trying Edge/Chrome --app")
+			showInfo(appName, "WebView2 недоступен. Пробую открыть через Edge/Chrome.\n\nЛучше установить WebView2 Runtime от Microsoft.")
 		}
 		cmd, err := openAppWindow(startURL, mode)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "окно:", err)
-		} else if cmd != nil && cmd.Process != nil {
+			logLaunch("openAppWindow: %v", err)
+			fatal("Не удалось открыть окно приложения:\n" + err.Error())
+			return
+		}
+		if cmd != nil && cmd.Process != nil {
 			go func() {
 				_, _ = cmd.Process.Wait()
 				_ = srv.Close()
 				os.Exit(0)
 			}()
+		} else {
+			// rundll32 / xdg-open: keep process alive briefly so localhost UI serves
+			time.Sleep(2 * time.Second)
 		}
 	}
 
@@ -279,5 +301,20 @@ func withLocalHandler(next http.Handler) http.Handler {
 
 func fatal(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
+	logLaunch("fatal: %s", msg)
+	showError(appName, msg)
 	os.Exit(1)
+}
+
+func logLaunch(format string, args ...any) {
+	dir, err := dataDir()
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "launch.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "%s %s\n", time.Now().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,4 +176,54 @@ func TestCSVRoundtrip(t *testing.T) {
 	if len(items) != 1 || items[0].ThemeName != "Метизы" {
 		t.Fatalf("imported temp/theme: %+v", items)
 	}
+}
+
+func TestMigrateOldItemsWithoutStorage(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "old.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE schema_version (version INTEGER NOT NULL);
+INSERT INTO schema_version(version) VALUES (1);
+CREATE TABLE items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  name_norm TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  cell TEXT NOT NULL DEFAULT '',
+  sku TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT INTO items(name,name_norm,kind,quantity,cell,sku,notes,created_at,updated_at)
+VALUES ('Болт','болт','zapchast',2,'A-1','','','2020-01-01T00:00:00Z','2020-01-01T00:00:00Z');
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	s := &Store{}
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db = db2
+	s.dbPath = dbPath
+	if err := s.migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	var storage string
+	if err := db2.QueryRow(`SELECT storage FROM items WHERE name='Болт'`).Scan(&storage); err != nil {
+		t.Fatalf("select storage: %v", err)
+	}
+	if storage != StorageBalance {
+		t.Fatalf("storage=%q", storage)
+	}
+	_ = db2.Close()
 }

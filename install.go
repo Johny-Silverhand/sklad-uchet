@@ -110,7 +110,7 @@ func pickFolder() (string, error) {
 	if runtime.GOOS != "windows" {
 		return defaultInstallDir(), nil
 	}
-	ps := `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Папка установки Склад Учёт'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }`
+	ps := `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Папка установки Точка Склада'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }`
 	cmd := exec.Command("powershell", "-NoProfile", "-STA", "-Command", ps)
 	cmd.SysProcAttr = showWindow()
 	out, err := cmd.Output()

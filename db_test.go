@@ -227,3 +227,67 @@ VALUES ('Болт','болт','zapchast',2,'A-1','','','2020-01-01T00:00:00Z','2
 	}
 	_ = db2.Close()
 }
+
+
+func TestServiceMaintenanceAndCrowded(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmp)
+	t.Setenv("APPDATA", filepath.Join(tmp, "AppData"))
+	store, err := OpenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	_, _, err = store.Create(UpsertInput{Name: "A1", Kind: KindZapchast, Quantity: 1, Cell: "X-1", Storage: StorageBalance, Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.Create(UpsertInput{Name: "A2", Kind: KindZapchast, Quantity: 2, Cell: "X-1", Storage: StorageBalance, Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = store.Adjust(1, 1)
+
+	res, err := store.IntegrityCheck()
+	if err != nil || res != "ok" {
+		t.Fatalf("integrity: %q err=%v", res, err)
+	}
+	if err := store.Vacuum(); err != nil {
+		t.Fatal(err)
+	}
+	crowded, err := store.CrowdedCells(1)
+	if err != nil || len(crowded) != 1 || crowded[0].Cell != "X-1" || crowded[0].Count != 2 {
+		t.Fatalf("crowded=%+v err=%v", crowded, err)
+	}
+	n, err := store.ClearMovements()
+	if err != nil || n < 1 {
+		t.Fatalf("clear movements n=%d err=%v", n, err)
+	}
+	mov, _ := store.RecentMovements(10)
+	if len(mov) != 0 {
+		t.Fatalf("expected empty movements, got %d", len(mov))
+	}
+	if store.DataDir() == "" || store.DBPath() == "" {
+		t.Fatal("paths empty")
+	}
+}
+
+func TestBuildReportHTML(t *testing.T) {
+	items := []Item{{Name: "Винт", Kind: KindZapchast, Quantity: 3, MinQty: 5, Cell: "A", Storage: StorageBalance, LowStock: true, ThemeName: "Крепёж"}}
+	html := buildReportHTML(items, "хранение: всё", "2026-01-01T00:00:00Z", "01.01.2026 03:00 (МСК)")
+	for _, want := range []string{"Точка Склада", "Victimok Labs", "Винт", "мало", "позиций — 1", "@page"} {
+		if !strings.Contains(html, want) && want != "мало" {
+			// low is CSS class, not word
+		}
+		if want == "мало" {
+			continue
+		}
+		if !strings.Contains(html, want) {
+			t.Fatalf("missing %q in report", want)
+		}
+	}
+	if !strings.Contains(html, "class=\"low\"") {
+		t.Fatal("expected low row class")
+	}
+}

@@ -8,8 +8,11 @@ import (
 	"strconv"
 )
 
-func openAppWindow(url string) (*exec.Cmd, error) {
-	w, h := 1280, 820
+func openAppWindow(url, mode string) (*exec.Cmd, error) {
+	w, h := 1120, 740
+	if mode == "app" {
+		w, h = 1360, 860
+	}
 	profileDir, err := dataDir()
 	if err != nil {
 		profileDir = os.TempDir()

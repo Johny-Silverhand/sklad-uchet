@@ -1,6 +1,6 @@
 const LINES = [
   "Проверка пакета…",
-  "Копирование SkladUchet.exe",
+  "Копирование TochkaSklada.exe",
   "Запись LICENSE.txt и app.ico",
   "Маркер installed.json",
   "Регистрация в «Программы и компоненты»",

@@ -18,6 +18,8 @@ func (a *api) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stats", a.stats)
 	mux.HandleFunc("/api/items", a.items)
 	mux.HandleFunc("/api/items/", a.itemByID)
+	mux.HandleFunc("/api/themes", a.themes)
+	mux.HandleFunc("/api/themes/", a.themeByID)
 	mux.HandleFunc("/api/duplicates", a.duplicates)
 	mux.HandleFunc("/api/duplicates/merge", a.merge)
 	mux.HandleFunc("/api/export.csv", a.exportCSV)
@@ -41,12 +43,13 @@ func readJSON(r *http.Request, dst any) error {
 
 func (a *api) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"ok":      true,
-		"app":     appName,
-		"version": appVersion,
-		"db":      a.store.DBPath(),
-		"credit":  creditLine,
+		"ok":        true,
+		"app":       appName,
+		"version":   appVersion,
+		"db":        a.store.DBPath(),
+		"credit":    creditLine,
 		"publisher": publisher,
+		"shell":     "webview2",
 	})
 }
 
@@ -63,12 +66,23 @@ func (a *api) items(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		low := r.URL.Query().Get("low") == "1" || r.URL.Query().Get("low_stock") == "1"
-		list, err := a.store.List(ListFilter{
+		f := ListFilter{
 			Kind:     r.URL.Query().Get("kind"),
 			QName:    firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("name")),
 			QCell:    r.URL.Query().Get("cell"),
 			LowStock: low,
-		})
+			Storage:  r.URL.Query().Get("storage"),
+		}
+		themeQ := r.URL.Query().Get("theme_id")
+		if themeQ == "none" || themeQ == "0" {
+			f.NoTheme = true
+		} else if themeQ != "" {
+			if id, err := strconv.ParseInt(themeQ, 10, 64); err == nil && id > 0 {
+				f.ThemeID = &id
+				f.ThemeOnly = true
+			}
+		}
+		list, err := a.store.List(f)
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": err.Error()})
 			return
@@ -151,6 +165,22 @@ func (a *api) itemByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"item": it})
 		return
 	}
+	if action == "storage" && r.Method == http.MethodPost {
+		var body struct {
+			Storage string `json:"storage"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "Некорректный JSON"})
+			return
+		}
+		it, err := a.store.SetStorage(id, body.Storage)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"item": it})
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -185,6 +215,77 @@ func (a *api) itemByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"item": it, "warned_duplicates": dups})
 	case http.MethodDelete:
 		if err := a.store.Delete(id); err != nil {
+			writeJSON(w, 404, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
+	default:
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *api) themes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		list, err := a.store.ListThemes()
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"themes": list})
+	case http.MethodPost:
+		var body struct {
+			Name      string `json:"name"`
+			SortOrder int    `json:"sort_order"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "Некорректный JSON"})
+			return
+		}
+		th, err := a.store.CreateTheme(body.Name, body.SortOrder)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 201, map[string]any{"theme": th})
+	default:
+		http.Error(w, "method", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *api) themeByID(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/themes/")
+	rest = strings.Trim(rest, "/")
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(w, 400, map[string]string{"error": "Неверный id"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		th, err := a.store.GetTheme(id)
+		if err != nil {
+			writeJSON(w, 404, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"theme": th})
+	case http.MethodPut, http.MethodPatch:
+		var body struct {
+			Name      string `json:"name"`
+			SortOrder int    `json:"sort_order"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "Некорректный JSON"})
+			return
+		}
+		th, err := a.store.UpdateTheme(id, body.Name, body.SortOrder)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"theme": th})
+	case http.MethodDelete:
+		if err := a.store.DeleteTheme(id); err != nil {
 			writeJSON(w, 404, map[string]string{"error": err.Error()})
 			return
 		}

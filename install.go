@@ -155,16 +155,17 @@ func doInstall(req installReq) error {
 	marker, _ := json.Marshal(map[string]string{"exe": destExe, "dir": dir})
 	_ = os.MkdirAll(filepath.Dir(markerPath()), 0o755)
 	_ = os.WriteFile(markerPath(), marker, 0o644)
+
 	icon := filepath.Join(dir, "app.ico")
 	if req.StartMenu {
 		programs := filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", publisher)
 		_ = os.MkdirAll(programs, 0o755)
-		_ = writeShortcut(filepath.Join(programs, appName+".lnk"), destExe, dir, icon)
+		_ = writeShortcut(filepath.Join(programs, appName+".lnk"), destExe, dir, icon, "--app")
 		_ = writeShortcut(filepath.Join(programs, "Удалить "+appName+".lnk"), uninst, dir, icon, "--uninstall")
 	}
 	if req.Desktop {
 		desk := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk")
-		_ = writeShortcut(desk, destExe, dir, icon)
+		_ = writeShortcut(desk, destExe, dir, icon, "--app")
 	}
 	if req.Autostart {
 		run := filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup", appName+".lnk")
@@ -253,7 +254,7 @@ func copyFile(src, dst string) error {
 
 func licenseText() string {
 	return appName + "\r\n" + creditLine + "\r\n© 2026 " + publisher + ".\r\n\r\n" +
-		"Локальное десктопное приложение учёта склада (Go + SQLite).\r\n" +
+		"Локальное Windows-приложение учёта склада (Go + SQLite + WebView2).\r\n" +
 		"Запрещается копирование, декомпиляция и перепродажа без письменного согласия Victimok Labs.\r\n"
 }
 

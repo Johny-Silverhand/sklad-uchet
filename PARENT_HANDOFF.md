@@ -1,23 +1,26 @@
 # Parent handoff — Точка Склада v1.3.0
 
-## Product `/workspace/sklad-uchet` — READY
+## Local product READY (ship this)
 
-| Item | Status |
-|------|--------|
-| Rename «Точка Склада» / TochkaSklada.exe | Done |
-| Icon app.ico + setup PNG logo | Done |
-| DB path stable `%APPDATA%\VictimokLabs\SkladUchet` | Done |
-| Service: print report, integrity, vacuum, paths, crowded cells, clear movements | Done |
-| `go test ./...` | Pass |
-| Windows amd64 Setup | `dist/TochkaSklada-Setup.exe` (+ compat SkladUchet-Setup.exe alias) |
+| Item | Path / status |
+|------|----------------|
+| Setup binary | **`/workspace/sklad-uchet/dist/TochkaSklada-Setup.exe`** (~12 MB) |
+| Compat alias | `dist/SkladUchet-Setup.exe` (same bytes) |
+| Source tarball | `dist/tochka-sklada-v1.3.0-sources.tgz` (full text+icons for MCP/git sync) |
+| Notes | `RELEASE_NOTES_v1.3.0.md` |
+| Tests | `go test ./...` PASS |
 
-## Release attach
-- **`/workspace/sklad-uchet/dist/TochkaSklada-Setup.exe`** ← GitHub Release `v1.3.0`
-- Notes: `RELEASE_NOTES_v1.3.0.md`
+## Features in the Setup.exe (embedded)
+- Rename **Точка Склада** / exe **TochkaSklada**; credit Victimok Labs
+- DB path unchanged: `%APPDATA%\VictimokLabs\SkladUchet`
+- Icon `app.ico` embedded → shortcuts/uninstall DisplayIcon
+- Setup wizard logo: `icon-256.png`
+- Service: printable report, low-stock print, integrity, VACUUM, paths/reveal, clear movements, crowded cells, stats cards, aboutVer from health
 
-user-Github MCP: no create_release/upload-asset. `gh` not authenticated. Parent/browser must publish Release with Setup.exe.
+## GitHub main (MCP partial)
+Pushed: VERSION, RELEASE_NOTES, README, main.go (Точка Склада 1.3.0), store_service.go, build-windows.sh, handoff docs.
+**Not fully synced yet:** api.go (Service routes), web/app/*, web/setup/*, binary icons, install.go, db_test.go — use `dist/tochka-sklada-v1.3.0-sources.tgz` or local tree to finish push_files.
 
-## Branding notes
-- Display: Точка Склада · credit Victimok Labs
-- Install dir default: `%LOCALAPPDATA%\Programs\Victimok Labs\TochkaSklada`
-- Data/DB: unchanged `VictimokLabs\SkladUchet`
+## Release
+user-Github MCP has **no** create_release/upload-asset. `gh` not authenticated. No computerUse.
+→ Parent: create Release **v1.3.0** in browser and attach **TochkaSklada-Setup.exe**.

@@ -43,6 +43,7 @@ func runNativeWindow(url, mode string) bool {
 	})
 	if wv == nil {
 		fmt.Fprintln(os.Stderr, "WebView2 недоступен — нужен Microsoft Edge WebView2 Runtime")
+		logLaunch("webview2.NewWithOptions returned nil")
 		return false
 	}
 	defer wv.Destroy()

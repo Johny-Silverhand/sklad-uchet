@@ -32,9 +32,27 @@ func TestCRUDAndMerge(t *testing.T) {
 	}
 	defer store.Close()
 
-	a, dups, err := store.Create(UpsertInput{Name: "Винт M6", Kind: KindZapchast, Quantity: 10, MinQty: 2, Cell: "A-1", SKU: "V1"})
+	// Fresh DB must be empty — no demo seed
+	all, err := store.List(ListFilter{})
+	if err != nil || len(all) != 0 {
+		t.Fatalf("expected empty DB, got %d err=%v", len(all), err)
+	}
+
+	th, err := store.CreateTheme("Крепёж", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tid := th.ID
+
+	a, dups, err := store.Create(UpsertInput{
+		Name: "Винт M6", Kind: KindZapchast, Quantity: 10, MinQty: 2, Cell: "A-1", SKU: "V1",
+		Storage: StorageBalance, ThemeID: &tid,
+	})
 	if err != nil || len(dups) != 0 {
 		t.Fatalf("create a: %v dups=%v", err, dups)
+	}
+	if a.Storage != StorageBalance || a.ThemeID == nil || *a.ThemeID != tid {
+		t.Fatalf("storage/theme: %+v", a)
 	}
 	if a.MinQty != 2 {
 		t.Fatalf("min_qty=%d", a.MinQty)
@@ -43,9 +61,19 @@ func TestCRUDAndMerge(t *testing.T) {
 	if err == nil || err.Error() != "duplicate" || len(dups) != 1 {
 		t.Fatalf("expected duplicate warn, got err=%v dups=%v", err, dups)
 	}
-	b, _, err := store.Create(UpsertInput{Name: "винт  m6", Kind: KindZapchast, Quantity: 5, MinQty: 5, Cell: "B-3", Notes: "коробка", Force: true})
+	b, _, err := store.Create(UpsertInput{
+		Name: "винт  m6", Kind: KindZapchast, Quantity: 5, MinQty: 5, Cell: "B-3", Notes: "коробка",
+		Storage: StorageTemporary, Force: true,
+	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if b.Storage != StorageTemporary {
+		t.Fatalf("temp storage=%s", b.Storage)
+	}
+	moved, err := store.SetStorage(b.ID, StorageBalance)
+	if err != nil || moved.Storage != StorageBalance {
+		t.Fatalf("set storage: %v %+v", err, moved)
 	}
 	merged, err := store.Merge(a.ID, []int64{b.ID})
 	if err != nil {
@@ -78,9 +106,9 @@ func TestCRUDAndMerge(t *testing.T) {
 	if err != nil || adj.Quantity != 12 {
 		t.Fatalf("adjust: %v qty=%d", err, adj.Quantity)
 	}
-	moved, err := store.MoveToCell(merged.ID, "C-9")
-	if err != nil || moved.Cell != "C-9" {
-		t.Fatalf("move: %v cell=%s", err, moved.Cell)
+	cellMoved, err := store.MoveToCell(merged.ID, "C-9")
+	if err != nil || cellMoved.Cell != "C-9" {
+		t.Fatalf("move: %v cell=%s", err, cellMoved.Cell)
 	}
 	st, err := store.Stats()
 	if err != nil {
@@ -88,6 +116,9 @@ func TestCRUDAndMerge(t *testing.T) {
 	}
 	if st.TotalItems != 1 || st.TotalQty != 12 {
 		t.Fatalf("stats=%+v", st)
+	}
+	if st.ByStorage[StorageBalance] != 1 {
+		t.Fatalf("by_storage=%v", st.ByStorage)
 	}
 	low, err := store.List(ListFilter{LowStock: true})
 	if err != nil {
@@ -101,6 +132,19 @@ func TestCRUDAndMerge(t *testing.T) {
 	if err != nil || len(low) != 1 {
 		t.Fatalf("low stock expected 1, got %d err=%v", len(low), err)
 	}
+
+	bal, err := store.List(ListFilter{Storage: StorageBalance, ThemeOnly: true, ThemeID: &tid})
+	if err != nil || len(bal) != 1 {
+		t.Fatalf("theme filter: %d err=%v", len(bal), err)
+	}
+
+	if err := store.DeleteTheme(tid); err != nil {
+		t.Fatal(err)
+	}
+	it, err := store.Get(merged.ID)
+	if err != nil || it.ThemeID != nil {
+		t.Fatalf("theme should be cleared: %+v err=%v", it, err)
+	}
 }
 
 func TestCSVRoundtrip(t *testing.T) {
@@ -112,7 +156,7 @@ func TestCSVRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	_, _, err = store.Create(UpsertInput{Name: "Гайка", Kind: KindKomplektuyushchee, Quantity: 3, MinQty: 1, Cell: "D-1", Force: true})
+	_, _, err = store.Create(UpsertInput{Name: "Гайка", Kind: KindKomplektuyushchee, Quantity: 3, MinQty: 1, Cell: "D-1", Storage: StorageBalance, Force: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,11 +164,15 @@ func TestCSVRoundtrip(t *testing.T) {
 	if err := store.ExportCSV(&buf); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "Гайка") {
-		t.Fatalf("csv missing name: %s", buf.String())
+	if !strings.Contains(buf.String(), "Гайка") || !strings.Contains(buf.String(), "storage") {
+		t.Fatalf("csv missing: %s", buf.String())
 	}
-	res, err := store.ImportCSV(strings.NewReader("name;kind;quantity;min_qty;cell;sku;notes\nБолт;zapchast;7;2;E-1;B1;\n"), true)
+	res, err := store.ImportCSV(strings.NewReader("name;kind;quantity;min_qty;cell;sku;notes;storage;theme\nБолт;zapchast;7;2;E-1;B1;;temporary;Метизы\n"), true)
 	if err != nil || res.Created != 1 {
 		t.Fatalf("import: %+v err=%v", res, err)
+	}
+	items, _ := store.List(ListFilter{Storage: StorageTemporary})
+	if len(items) != 1 || items[0].ThemeName != "Метизы" {
+		t.Fatalf("imported temp/theme: %+v", items)
 	}
 }

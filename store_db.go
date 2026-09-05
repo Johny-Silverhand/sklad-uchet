@@ -72,14 +72,14 @@ type CellStat struct {
 }
 
 type Stats struct {
-	TotalItems   int            `json:"total_items"`
-	TotalQty     int            `json:"total_qty"`
-	LowStock     int            `json:"low_stock"`
-	ByKind       map[string]int `json:"by_kind"`
-	QtyByKind    map[string]int `json:"qty_by_kind"`
-	ByStorage    map[string]int `json:"by_storage"`
+	TotalItems  int            `json:"total_items"`
+	TotalQty    int            `json:"total_qty"`
+	LowStock    int            `json:"low_stock"`
+	ByKind      map[string]int `json:"by_kind"`
+	QtyByKind   map[string]int `json:"qty_by_kind"`
+	ByStorage   map[string]int `json:"by_storage"`
 	QtyByStorage map[string]int `json:"qty_by_storage"`
-	TopCells     []CellStat     `json:"top_cells"`
+	TopCells    []CellStat     `json:"top_cells"`
 }
 
 type Store struct {
@@ -150,6 +150,7 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
+	// Base tables only. Do NOT create indexes on columns that older DBs may lack yet.
 	if _, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
@@ -178,8 +179,6 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS idx_items_name_norm ON items(name_norm);
 CREATE INDEX IF NOT EXISTS idx_items_cell ON items(cell);
 CREATE INDEX IF NOT EXISTS idx_items_kind ON items(kind);
-CREATE INDEX IF NOT EXISTS idx_items_storage ON items(storage);
-CREATE INDEX IF NOT EXISTS idx_items_theme ON items(theme_id);
 CREATE TABLE IF NOT EXISTS movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL,
@@ -196,46 +195,28 @@ CREATE INDEX IF NOT EXISTS idx_movements_created ON movements(created_at);
 		return err
 	}
 
-	var ver int
-	err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&ver)
-	if err != nil {
+	// Always ensure columns exist (CREATE TABLE IF NOT EXISTS does not alter old schemas).
+	if err := s.ensureColumn("items", "min_qty", `ALTER TABLE items ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("items", "storage", `ALTER TABLE items ADD COLUMN storage TEXT NOT NULL DEFAULT 'balance'`); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("items", "theme_id", `ALTER TABLE items ADD COLUMN theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL`); err != nil {
 		return err
 	}
 
-	if ver < 2 {
-		var hasMin int
-		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='min_qty'`).Scan(&hasMin)
-		if hasMin == 0 {
-			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 0`); err != nil {
-				return err
-			}
-		}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_storage ON items(storage)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_theme ON items(theme_id)`); err != nil {
+		return err
 	}
 
-	if ver < 3 {
-		var hasStorage int
-		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='storage'`).Scan(&hasStorage)
-		if hasStorage == 0 {
-			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN storage TEXT NOT NULL DEFAULT 'balance'`); err != nil {
-				return err
-			}
-		}
-		var hasTheme int
-		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='theme_id'`).Scan(&hasTheme)
-		if hasTheme == 0 {
-			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL`); err != nil {
-				return err
-			}
-		}
-		if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_storage ON items(storage)`); err != nil {
-			return err
-		}
-		if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_theme ON items(theme_id)`); err != nil {
-			return err
-		}
-		// Never seed demo items. Existing DBs keep user data; fresh DBs stay empty.
+	var ver int
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&ver); err != nil {
+		return err
 	}
-
 	if ver < schemaVersion {
 		if _, err := s.db.Exec(`DELETE FROM schema_version`); err != nil {
 			return err
@@ -245,6 +226,19 @@ CREATE INDEX IF NOT EXISTS idx_movements_created ON movements(created_at);
 		}
 	}
 	return nil
+}
+
+func (s *Store) ensureColumn(table, col, alterSQL string) error {
+	var n int
+	q := `SELECT COUNT(*) FROM pragma_table_info('` + table + `') WHERE name=?`
+	if err := s.db.QueryRow(q, col).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := s.db.Exec(alterSQL)
+	return err
 }
 
 func NormalizeName(name string) string {

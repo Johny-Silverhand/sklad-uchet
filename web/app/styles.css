@@ -172,3 +172,7 @@ tr.theme-group td {
   letter-spacing: .04em; padding: 8px 14px; border-bottom-color: rgba(126,232,211,.25);
 }
 .sidebar .nav-btn { font-size: .92rem; }
+
+.tool-card label.muted { display: grid; gap: 6px; font-size: .85rem; }
+.tool-card select, .tool-card input[type="search"] { width: 100%; }
+.chip { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .88rem; }

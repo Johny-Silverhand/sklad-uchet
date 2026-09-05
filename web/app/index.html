@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Склад Учёт</title>
+  <title>Точка Склада</title>
+  <link rel="icon" href="/setup/media/icon-256.png" />
   <link rel="stylesheet" href="/app/styles.css" />
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="logo">СУ</div>
+        <div class="logo">ТС</div>
         <div>
-          <div class="brand-title">Склад Учёт</div>
+          <div class="brand-title">Точка Склада</div>
           <div class="brand-sub">Victimok Labs</div>
         </div>
       </div>
@@ -103,17 +104,58 @@
       <section id="view-tools" class="view" hidden>
         <header class="toolbar"><h1>Сервис</h1></header>
         <div class="tools">
+          <div class="ov-grid" id="svcStats" style="padding:0">
+            <div class="ov-card"><h4>Позиций</h4><div class="big" id="svcTotal">—</div></div>
+            <div class="ov-card"><h4>Сумма qty</h4><div class="big" id="svcQty">—</div></div>
+            <div class="ov-card"><h4>Мало</h4><div class="big" id="svcLow" style="color:var(--warn)">—</div></div>
+            <div class="ov-card"><h4>Баланс / врем.</h4><div class="big" id="svcStor">—</div></div>
+          </div>
+
+          <div class="tool-card">
+            <h3>Печать отчёта</h3>
+            <p class="muted">Печатная таблица всех позиций или по теме. Дата и фильтры в шапке. A4.</p>
+            <div class="row2" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+              <label class="muted">Тема
+                <select id="rptTheme">
+                  <option value="all">Все</option>
+                  <option value="none">Без темы</option>
+                </select>
+              </label>
+              <label class="muted">Хранение
+                <select id="rptStorage">
+                  <option value="all">Всё</option>
+                  <option value="balance">Баланс</option>
+                  <option value="temporary">Временное</option>
+                </select>
+              </label>
+            </div>
+            <label class="chip" style="margin-bottom:10px"><input type="checkbox" id="rptLow" /> Только мало</label>
+            <div class="actions">
+              <button class="btn primary" id="btnReportPrint">Печать</button>
+              <button class="btn" id="btnReportOpen">Открыть для PDF</button>
+              <button class="btn" id="btnReportLow">Список «мало»</button>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <h3>Ячейки с несколькими позициями</h3>
+            <p class="muted">Ячейки, где лежит больше одной позиции (возможная путаница).</p>
+            <div id="crowdedBox" class="muted">—</div>
+            <button class="btn" id="btnCrowded" style="margin-top:10px">Проверить</button>
+          </div>
+
           <div class="tool-card">
             <h3>CSV экспорт / импорт</h3>
-            <p class="muted">UTF-8, «;». Поля: id, name, kind, quantity, min_qty, cell, sku, notes, storage, theme.</p>
+            <p class="muted">Файл UTF-8 с разделителем «;» (Excel в России). Колонки: id, name, kind, quantity, min_qty, cell, sku, notes, storage, theme. При импорте совпадения по id или названию+ячейке обновляются; новые темы создаются автоматически. Сделайте backup перед большим импортом.</p>
             <div class="actions">
               <a class="btn primary" href="/api/export.csv" download>Экспорт CSV</a>
               <label class="btn">Импорт CSV<input type="file" id="importFile" accept=".csv,text/csv" hidden /></label>
             </div>
           </div>
+
           <div class="tool-card">
             <h3>Резервная копия БД</h3>
-            <p class="muted">Копия SQLite в папку backups (или укажите путь).</p>
+            <p class="muted">Копия файла SQLite. Пустое поле пути = автосохранение в папку backups рядом с базой. Восстановление заменяет текущую БД (предыдущая сохранится как .before-restore). Не закрывайте программу во время операции.</p>
             <div class="row2">
               <input id="backupPath" placeholder="Путь (пусто = авто)" />
               <button class="btn primary" id="btnBackup">Создать backup</button>
@@ -123,15 +165,41 @@
               <button class="btn danger" id="btnRestore">Восстановить</button>
             </div>
           </div>
+
+          <div class="tool-card">
+            <h3>Обслуживание БД</h3>
+            <p class="muted">Проверка целостности SQLite и сжатие файла (VACUUM).</p>
+            <div class="actions">
+              <button class="btn" id="btnIntegrity">Проверить целостность</button>
+              <button class="btn" id="btnVacuum">VACUUM</button>
+            </div>
+            <div id="dbMaintBox" class="muted" style="margin-top:10px">—</div>
+          </div>
+
+          <div class="tool-card">
+            <h3>Папка данных</h3>
+            <p class="muted">База и логи хранятся локально (offline). Можно скопировать путь или открыть в Проводнике (Windows).</p>
+            <div id="pathsBox" class="movements muted">—</div>
+            <div class="actions" style="margin-top:10px">
+              <button class="btn" id="btnCopyPath">Копировать путь</button>
+              <button class="btn" id="btnRevealData">Открыть в Проводнике</button>
+              <button class="btn" id="btnRefreshPaths">Обновить</button>
+            </div>
+          </div>
+
           <div class="tool-card">
             <h3>Последние движения</h3>
             <div id="movementsBox" class="movements muted">—</div>
-            <button class="btn" id="btnMovements" style="margin-top:10px">Обновить</button>
+            <div class="actions" style="margin-top:10px">
+              <button class="btn" id="btnMovements">Обновить</button>
+              <button class="btn danger" id="btnClearMovements">Очистить журнал</button>
+            </div>
           </div>
+
           <div class="tool-card about">
             <h3>О программе</h3>
-            <p><strong>Склад Учёт</strong> v<span id="aboutVer">1.2.0</span></p>
-            <p>Локальное Windows-приложение (Go + SQLite + WebView2). Без браузерной рамки.</p>
+            <p><strong>Точка Склада</strong> v<span id="aboutVer">—</span></p>
+            <p>Локальное Windows-приложение (Go + SQLite + WebView2). Без браузерной рамки. Данные только на этом ПК.</p>
             <p class="credit-line">Разработано в Victimok Labs</p>
           </div>
         </div>

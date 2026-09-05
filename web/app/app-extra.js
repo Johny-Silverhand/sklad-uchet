@@ -11,6 +11,86 @@ async function loadMovements() {
   }
 }
 
+
+function reportURL(extraLow) {
+  const params = new URLSearchParams();
+  const theme = $("#rptTheme")?.value || "all";
+  const storage = $("#rptStorage")?.value || "all";
+  const low = extraLow || ($("#rptLow")?.checked);
+  if (theme && theme !== "all") params.set("theme_id", theme);
+  if (storage && storage !== "all") params.set("storage", storage);
+  if (low) params.set("low", "1");
+  const q = params.toString();
+  return "/api/report.html" + (q ? "?" + q : "");
+}
+
+function openReport(printAfter, forceLow) {
+  const url = reportURL(forceLow);
+  const w = window.open(url, "_blank");
+  if (!w) {
+    toast("Не удалось открыть окно отчёта", "err");
+    return;
+  }
+  if (printAfter) {
+    const tryPrint = () => {
+      try { w.focus(); w.print(); } catch (_) {}
+    };
+    // WebView2 / Edge: print after load
+    setTimeout(tryPrint, 400);
+  }
+}
+
+async function loadServiceStats() {
+  try {
+    const st = await api("/api/stats");
+    const by = st.by_storage || {};
+    $("#svcTotal").textContent = st.total_items ?? 0;
+    $("#svcQty").textContent = st.total_qty ?? 0;
+    $("#svcLow").textContent = st.low_stock ?? 0;
+    $("#svcStor").textContent = (by.balance ?? 0) + " / " + (by.temporary ?? 0);
+  } catch (e) {
+    $("#svcTotal").textContent = "—";
+  }
+}
+
+async function loadPaths() {
+  try {
+    const p = await api("/api/paths");
+    $("#pathsBox").textContent = "БД: " + (p.db || "—") + "\nПапка: " + (p.data_dir || "—") + "\nОС: " + (p.os || "—");
+    window.__dataDir = p.data_dir || "";
+    window.__dbPath = p.db || "";
+  } catch (e) {
+    $("#pathsBox").textContent = e.message;
+  }
+}
+
+async function loadCrowded() {
+  try {
+    const data = await api("/api/cells/crowded?min=1");
+    const cells = data.cells || [];
+    if (!cells.length) {
+      $("#crowdedBox").textContent = "Нет ячеек с более чем одной позицией.";
+      return;
+    }
+    $("#crowdedBox").innerHTML = "<ul class=\"ov-list\">" + cells.map((c) =>
+      `<li><b class="cell-code">${escapeHtml(c.cell)}</b> — ${c.count} поз., ${c.qty} шт.</li>`
+    ).join("") + "</ul>";
+  } catch (e) {
+    $("#crowdedBox").textContent = e.message;
+  }
+}
+
+async function loadServicePage() {
+  fillThemeSelects();
+  await Promise.all([
+    loadServiceStats(),
+    loadMovements(),
+    loadPaths(),
+    loadCrowded(),
+    loadHealth(),
+  ]);
+}
+
 function setListHeaders() {
   if (currentStorage === "balance") {
     $("#listTitle").textContent = "Баланс";
@@ -37,7 +117,7 @@ function switchView(name) {
   if (name === "themes") renderThemesView().catch((e) => toast(e.message, "err"));
   if (name === "duplicates") loadDuplicates().catch((e) => toast(e.message, "err"));
   if (name === "overview") loadOverview().catch((e) => toast(e.message, "err"));
-  if (name === "tools") loadMovements().catch(() => {});
+  if (name === "tools") loadServicePage().catch((e) => toast(e.message, "err"));
 }
 
 function debounce(fn, ms) {
@@ -219,10 +299,61 @@ function bind() {
   });
 
   $("#btnMovements").addEventListener("click", () => loadMovements());
+
+  $("#btnReportPrint")?.addEventListener("click", () => openReport(true, false));
+  $("#btnReportOpen")?.addEventListener("click", () => openReport(false, false));
+  $("#btnReportLow")?.addEventListener("click", () => openReport(true, true));
+
+  $("#btnCrowded")?.addEventListener("click", () => loadCrowded().catch((e) => toast(e.message, "err")));
+
+  $("#btnIntegrity")?.addEventListener("click", async () => {
+    try {
+      const data = await api("/api/db/integrity", { method: "POST", body: "{}" });
+      $("#dbMaintBox").textContent = data.ok ? "Целостность: OK" : ("Результат: " + (data.result || "?"));
+      toast(data.ok ? "БД в порядке" : "Проблемы целостности", data.ok ? "ok" : "err");
+    } catch (e) { toast(e.message, "err"); }
+  });
+
+  $("#btnVacuum")?.addEventListener("click", async () => {
+    if (!confirm("Сжать базу (VACUUM)? Операция может занять несколько секунд.")) return;
+    try {
+      await api("/api/db/vacuum", { method: "POST", body: "{}" });
+      $("#dbMaintBox").textContent = "VACUUM выполнен.";
+      toast("VACUUM готов", "ok");
+      await loadPaths();
+    } catch (e) { toast(e.message, "err"); }
+  });
+
+  $("#btnRefreshPaths")?.addEventListener("click", () => loadPaths());
+  $("#btnCopyPath")?.addEventListener("click", async () => {
+    const text = window.__dataDir || window.__dbPath || "";
+    if (!text) { toast("Путь неизвестен", "err"); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Путь скопирован", "ok");
+    } catch {
+      prompt("Скопируйте путь:", text);
+    }
+  });
+  $("#btnRevealData")?.addEventListener("click", async () => {
+    try {
+      const data = await api("/api/reveal-data", { method: "POST", body: "{}" });
+      toast("Открыто: " + (data.path || ""), "ok");
+    } catch (e) { toast(e.message, "err"); }
+  });
+
+  $("#btnClearMovements")?.addEventListener("click", async () => {
+    if (!confirm("Очистить журнал движений? Позиции склада не удаляются.")) return;
+    try {
+      const data = await api("/api/movements?clear=1", { method: "POST", body: "{}" });
+      toast("Удалено записей: " + (data.deleted ?? 0), "ok");
+      await loadMovements();
+    } catch (e) { toast(e.message, "err"); }
+  });
 }
 
 async function init() {
-  document.title = "Склад Учёт";
+  document.title = "Точка Склада";
   bind();
   setListHeaders();
   await Promise.all([loadHealth(), loadThemes(), loadStats(), loadItems()]);

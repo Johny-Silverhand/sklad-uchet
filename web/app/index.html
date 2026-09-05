@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Склад Учёт · Victimok Labs</title>
+  <title>Склад Учёт</title>
   <link rel="stylesheet" href="/app/styles.css" />
 </head>
 <body>
@@ -17,14 +17,16 @@
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-btn active" data-view="list">📦 Склад</button>
-        <button class="nav-btn" data-view="overview">📊 Обзор</button>
+        <button class="nav-btn active" data-view="balance">📦 Баланс</button>
+        <button class="nav-btn" data-view="temporary">⏱ Временное хранение</button>
+        <button class="nav-btn" data-view="themes">🏷 Темы</button>
         <button class="nav-btn" data-view="duplicates">🔗 Дубликаты</button>
+        <button class="nav-btn" data-view="overview">📊 Обзор</button>
         <button class="nav-btn" data-view="tools">🛠 Сервис</button>
       </nav>
       <div class="sidebar-stats" id="statsBox">
-        <div class="stat"><span>Позиций</span><b id="stItems">0</b></div>
-        <div class="stat"><span>Всего шт.</span><b id="stQty">0</b></div>
+        <div class="stat"><span>На балансе</span><b id="stBalance">0</b></div>
+        <div class="stat"><span>Временное</span><b id="stTemp">0</b></div>
         <div class="stat warn"><span>Мало</span><b id="stLow">0</b></div>
       </div>
       <div class="sidebar-credit">Разработано в Victimok Labs</div>
@@ -34,16 +36,24 @@
     <main class="main">
       <section id="view-list" class="view">
         <header class="toolbar">
+          <div>
+            <h1 id="listTitle">Баланс</h1>
+            <p class="muted" id="listSubtitle">Постоянное хранение на складе</p>
+          </div>
           <div class="search-row">
             <input id="qName" type="search" placeholder="Поиск по названию…" autocomplete="off" />
-            <input id="qCell" type="search" placeholder="Ячейка (A-12)…" autocomplete="off" />
+            <input id="qCell" type="search" placeholder="Ячейка…" autocomplete="off" />
             <select id="qKind">
               <option value="all">Все типы</option>
               <option value="zapchast">Запчасть</option>
               <option value="ustroystvo">Устройство</option>
               <option value="komplektuyushchee">Комплектующее</option>
             </select>
-            <label class="chip"><input type="checkbox" id="qLow" /> Мало на складе</label>
+            <select id="qTheme">
+              <option value="all">Все темы</option>
+              <option value="none">Без темы</option>
+            </select>
+            <label class="chip"><input type="checkbox" id="qLow" /> Мало</label>
           </div>
           <button class="btn primary" id="btnAdd">+ Добавить</button>
         </header>
@@ -52,6 +62,7 @@
             <thead>
               <tr>
                 <th>Название</th>
+                <th>Тема</th>
                 <th>Тип</th>
                 <th>Кол-во</th>
                 <th>Мин</th>
@@ -62,8 +73,17 @@
             </thead>
             <tbody id="itemsBody"></tbody>
           </table>
-          <div class="empty" id="emptyList" hidden>Ничего не найдено. Добавьте первую позицию.</div>
+          <div class="empty" id="emptyList" hidden>Пусто. Добавьте первую позицию — демо-данных нет.</div>
         </div>
+      </section>
+
+      <section id="view-themes" class="view" hidden>
+        <header class="toolbar">
+          <h1>Темы</h1>
+          <button class="btn primary" id="btnAddTheme">+ Новая тема</button>
+        </header>
+        <div class="tools" id="themesBox"></div>
+        <div class="empty" id="emptyThemes" hidden>Тем пока нет. Создайте свои категории (например «Радиодетали», «Крепёж»).</div>
       </section>
 
       <section id="view-overview" class="view" hidden>
@@ -85,7 +105,7 @@
         <div class="tools">
           <div class="tool-card">
             <h3>CSV экспорт / импорт</h3>
-            <p class="muted">UTF-8, разделитель «;». Поля: id, name, kind, quantity, min_qty, cell, sku, notes.</p>
+            <p class="muted">UTF-8, «;». Поля: id, name, kind, quantity, min_qty, cell, sku, notes, storage, theme.</p>
             <div class="actions">
               <a class="btn primary" href="/api/export.csv" download>Экспорт CSV</a>
               <label class="btn">Импорт CSV<input type="file" id="importFile" accept=".csv,text/csv" hidden /></label>
@@ -93,7 +113,7 @@
           </div>
           <div class="tool-card">
             <h3>Резервная копия БД</h3>
-            <p class="muted">Копия SQLite в папку backups рядом с базой (или укажите путь).</p>
+            <p class="muted">Копия SQLite в папку backups (или укажите путь).</p>
             <div class="row2">
               <input id="backupPath" placeholder="Путь (пусто = авто)" />
               <button class="btn primary" id="btnBackup">Создать backup</button>
@@ -110,8 +130,8 @@
           </div>
           <div class="tool-card about">
             <h3>О программе</h3>
-            <p><strong>Склад Учёт</strong> v<span id="aboutVer">1.1.0</span></p>
-            <p>Локальное десктопное приложение (Go + SQLite). UI через Edge/Chrome --app=.</p>
+            <p><strong>Склад Учёт</strong> v<span id="aboutVer">1.2.0</span></p>
+            <p>Локальное Windows-приложение (Go + SQLite + WebView2). Без браузерной рамки.</p>
             <p class="credit-line">Разработано в Victimok Labs</p>
           </div>
         </div>
@@ -134,16 +154,29 @@
             <option value="komplektuyushchee">Комплектующее</option>
           </select>
         </label>
-        <label>Количество *
-          <input id="fQty" type="number" min="0" step="1" value="0" required />
+        <label>Хранение *
+          <select id="fStorage" required>
+            <option value="balance">Баланс (постоянное)</option>
+            <option value="temporary">Временное хранение</option>
+          </select>
         </label>
       </div>
       <div class="row2">
+        <label>Количество *
+          <input id="fQty" type="number" min="0" step="1" value="0" required />
+        </label>
         <label>Мин. остаток
           <input id="fMin" type="number" min="0" step="1" value="0" />
         </label>
+      </div>
+      <div class="row2">
         <label>Ячейка
           <input id="fCell" placeholder="A-12" maxlength="64" />
+        </label>
+        <label>Тема
+          <select id="fTheme">
+            <option value="">Без темы</option>
+          </select>
         </label>
       </div>
       <label>Артикул (SKU)
@@ -156,6 +189,23 @@
       <div class="dlg-actions">
         <button type="button" class="btn" id="btnCancel">Отмена</button>
         <button type="submit" class="btn primary" id="btnSave">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="themeDialog">
+    <form method="dialog" id="themeForm" class="dialog">
+      <h2 id="themeDlgTitle">Новая тема</h2>
+      <input type="hidden" id="thId" />
+      <label>Название *
+        <input id="thName" required maxlength="120" placeholder="Например: Крепёж" />
+      </label>
+      <label>Порядок сортировки
+        <input id="thSort" type="number" step="1" value="0" />
+      </label>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="themeCancel">Отмена</button>
+        <button type="submit" class="btn primary">Сохранить</button>
       </div>
     </form>
   </dialog>

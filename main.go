@@ -22,7 +22,7 @@ var webFS embed.FS
 const (
 	appName     = "Склад Учёт"
 	appExeName  = "SkladUchet"
-	appVersion  = "1.2.0"
+	appVersion  = "1.2.1"
 	publisher   = "Victimok Labs"
 	uninstID    = "VictimokLabsSkladUchet"
 	creditLine  = "Разработано в Victimok Labs"
@@ -30,11 +30,14 @@ const (
 )
 
 func main() {
-	noBrowser := flag.Bool("no-browser", false, "не открывать окно (только HTTP на localhost)")
-	addrFlag := flag.String("addr", "", "адрес HTTP-сервера (по умолчанию 127.0.0.1:"+defaultPort+")")
-	flag.Parse()
+	mode := detectMode(os.Args[1:])
+	argsForFlags := filterModeFlags(os.Args)
+	flagSet := flag.NewFlagSet(appExeName, flag.ContinueOnError)
+	flagSet.SetOutput(os.Stderr)
+	noBrowser := flagSet.Bool("no-browser", false, "не открывать окно (отладка)")
+	addrFlag := flagSet.String("addr", "", "локальный адрес UI (по умолчанию 127.0.0.1:"+defaultPort+")")
+	_ = flagSet.Parse(argsForFlags[1:])
 
-	mode := detectMode()
 	addr := *addrFlag
 	if addr == "" {
 		addr = "127.0.0.1:" + defaultPort
@@ -44,7 +47,7 @@ func main() {
 	if err != nil {
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			fatal("Не удалось открыть порт: " + err.Error())
+			fatal("Не удалось открыть локальный порт: " + err.Error())
 			return
 		}
 	}
@@ -70,7 +73,7 @@ func main() {
 	}
 	mux.Handle("/", spaHandler(sub, mode))
 
-	srv := &http.Server{Handler: withCORS(mux)}
+	srv := &http.Server{Handler: withLocalHandler(mux)}
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, err)
@@ -81,29 +84,28 @@ func main() {
 	startURL := base + "/"
 	switch mode {
 	case "setup":
-		startURL = base + "/setup/index.html"
+		startURL = base + "/setup/"
 	case "uninstall":
 		startURL = base + "/setup/uninstall.html"
 	}
 
+	waitReady(startURL)
+
 	fmt.Println(appName, appVersion, "·", publisher)
 	fmt.Println("mode:", mode)
-	fmt.Println("UI:", startURL)
 	if store != nil {
 		fmt.Println("DB:", store.DBPath())
 	}
 	fmt.Println(creditLine)
 
 	if !*noBrowser {
-		// Prefer native WebView2 window on Windows (real desktop app, no browser chrome).
 		if runtime.GOOS == "windows" {
 			used := runNativeWindow(startURL, mode)
 			_ = srv.Close()
 			if used {
 				return
 			}
-			// Fallback only if WebView2 runtime missing.
-			fmt.Fprintln(os.Stderr, "fallback: browser --app=")
+			fmt.Fprintln(os.Stderr, "WebView2 недоступен — запасной запуск окна")
 		}
 		cmd, err := openAppWindow(startURL, mode)
 		if err != nil {
@@ -124,16 +126,20 @@ func main() {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func detectMode() string {
+func detectMode(args []string) string {
 	mode := "setup"
-	for _, a := range os.Args[1:] {
+	hasFlag := false
+	for _, a := range args {
 		switch a {
 		case "--app", "-app":
 			mode = "app"
+			hasFlag = true
 		case "--setup", "-setup":
 			mode = "setup"
+			hasFlag = true
 		case "--uninstall", "-uninstall":
 			mode = "uninstall"
+			hasFlag = true
 		}
 	}
 	if mode == "setup" {
@@ -141,14 +147,6 @@ func detectMode() string {
 			if _, err := os.Stat(filepath.Join(filepath.Dir(exe), "installed.json")); err == nil {
 				mode = "app"
 			}
-		}
-	}
-	hasFlag := false
-	for _, a := range os.Args[1:] {
-		if strings.HasPrefix(a, "--app") || strings.HasPrefix(a, "--setup") || strings.HasPrefix(a, "--uninstall") ||
-			a == "-app" || a == "-setup" || a == "-uninstall" {
-			hasFlag = true
-			break
 		}
 	}
 	if !hasFlag && mode == "setup" {
@@ -159,58 +157,115 @@ func detectMode() string {
 	return mode
 }
 
+func filterModeFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		if i == 0 {
+			out = append(out, a)
+			continue
+		}
+		switch a {
+		case "--app", "-app", "--setup", "-setup", "--uninstall", "-uninstall":
+			continue
+		default:
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func waitReady(url string) {
+	client := &http.Client{Timeout: 200 * time.Millisecond, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode > 0 && resp.StatusCode < 500 {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func hasAppUI() bool {
 	_, err := webFS.Open("web/app/index.html")
 	return err == nil
 }
 
+func writeHTML(w http.ResponseWriter, b []byte) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(b)
+}
+
+func writeUIError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	_, _ = fmt.Fprintf(w, `<!doctype html><html><body style="margin:0;background:#0b0f14;color:#e8eef7;font-family:Segoe UI,sans-serif;display:grid;place-items:center;height:100vh"><div style="text-align:center;padding:24px"><div style="font-size:18px;font-weight:600;margin-bottom:8px">%s</div><div style="opacity:.75">%s</div></div></body></html>`, appName, msg)
+}
+
+func serveEmbedHTML(w http.ResponseWriter, root fs.FS, name string) {
+	b, err := fs.ReadFile(root, name)
+	if err != nil {
+		writeUIError(w, 404, "Не удалось загрузить интерфейс. Переустановите программу.")
+		return
+	}
+	writeHTML(w, b)
+}
+
 func spaHandler(root fs.FS, mode string) http.Handler {
 	files := http.FileServer(http.FS(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && mode == "setup" {
-			http.Redirect(w, r, "/setup/index.html", http.StatusFound)
+		path := r.URL.Path
+		switch path {
+		case "/", "/index.html":
+			switch mode {
+			case "setup":
+				serveEmbedHTML(w, root, "setup/index.html")
+			case "uninstall":
+				serveEmbedHTML(w, root, "setup/uninstall.html")
+			default:
+				if !hasAppUI() {
+					serveEmbedHTML(w, root, "setup/index.html")
+					return
+				}
+				serveEmbedHTML(w, root, "app/index.html")
+			}
+			return
+		case "/setup", "/setup/", "/setup/index.html":
+			serveEmbedHTML(w, root, "setup/index.html")
+			return
+		case "/setup/uninstall.html":
+			serveEmbedHTML(w, root, "setup/uninstall.html")
 			return
 		}
-		if r.URL.Path == "/" && mode == "uninstall" {
-			http.Redirect(w, r, "/setup/uninstall.html", http.StatusFound)
+
+		p := strings.TrimPrefix(path, "/")
+		// Avoid FileServer's redirect from */index.html → ./ (breaks WebView).
+		if strings.HasSuffix(p, "/index.html") || p == "index.html" {
+			serveEmbedHTML(w, root, p)
 			return
 		}
-		p := strings.TrimPrefix(r.URL.Path, "/")
-		if p == "" {
-			if !hasAppUI() {
-				http.Redirect(w, r, "/setup/index.html", http.StatusFound)
+		if p != "" {
+			if st, err := fs.Stat(root, p); err == nil && !st.IsDir() {
+				files.ServeHTTP(w, r)
 				return
 			}
-			b, err := fs.ReadFile(root, "app/index.html")
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write(b)
+		}
+		if hasAppUI() && !strings.HasPrefix(path, "/setup") && !strings.HasPrefix(path, "/api") {
+			serveEmbedHTML(w, root, "app/index.html")
 			return
 		}
-		if _, err := fs.Stat(root, p); err == nil {
-			files.ServeHTTP(w, r)
-			return
-		}
-		if hasAppUI() && !strings.HasPrefix(r.URL.Path, "/setup") && !strings.HasPrefix(r.URL.Path, "/api") {
-			b, err := fs.ReadFile(root, "app/index.html")
-			if err == nil {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				_, _ = w.Write(b)
-				return
-			}
-		}
-		http.NotFound(w, r)
+		writeUIError(w, 404, "Интерфейс не найден. Переустановите программу.")
 	})
 }
 
-func withCORS(next http.Handler) http.Handler {
+func withLocalHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(204)
 			return

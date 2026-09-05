@@ -20,9 +20,9 @@ import (
 var webFS embed.FS
 
 const (
-	appName     = "Склад Учёт"
-	appExeName  = "SkladUchet"
-	appVersion  = "1.2.3"
+	appName     = "Точка Склада"
+	appExeName  = "TochkaSklada"
+	appVersion  = "1.3.0"
 	publisher   = "Victimok Labs"
 	uninstID    = "VictimokLabsSkladUchet"
 	creditLine  = "Разработано в Victimok Labs"

@@ -8,9 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -22,7 +22,7 @@ var webFS embed.FS
 const (
 	appName     = "Склад Учёт"
 	appExeName  = "SkladUchet"
-	appVersion  = "1.1.0"
+	appVersion  = "1.2.0"
 	publisher   = "Victimok Labs"
 	uninstID    = "VictimokLabsSkladUchet"
 	creditLine  = "Разработано в Victimok Labs"
@@ -30,7 +30,7 @@ const (
 )
 
 func main() {
-	noBrowser := flag.Bool("no-browser", false, "не открывать окно браузера")
+	noBrowser := flag.Bool("no-browser", false, "не открывать окно (только HTTP на localhost)")
 	addrFlag := flag.String("addr", "", "адрес HTTP-сервера (по умолчанию 127.0.0.1:"+defaultPort+")")
 	flag.Parse()
 
@@ -94,13 +94,21 @@ func main() {
 	}
 	fmt.Println(creditLine)
 
-	var browserCmd *exec.Cmd
 	if !*noBrowser {
+		// Prefer native WebView2 window on Windows (real desktop app, no browser chrome).
+		if runtime.GOOS == "windows" {
+			used := runNativeWindow(startURL, mode)
+			_ = srv.Close()
+			if used {
+				return
+			}
+			// Fallback only if WebView2 runtime missing.
+			fmt.Fprintln(os.Stderr, "fallback: browser --app=")
+		}
 		cmd, err := openAppWindow(startURL, mode)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "браузер:", err)
+			fmt.Fprintln(os.Stderr, "окно:", err)
 		} else if cmd != nil && cmd.Process != nil {
-			browserCmd = cmd
 			go func() {
 				_, _ = cmd.Process.Wait()
 				_ = srv.Close()
@@ -113,9 +121,6 @@ func main() {
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
 	_ = srv.Close()
-	if browserCmd != nil && browserCmd.Process != nil {
-		_ = browserCmd.Process.Kill()
-	}
 	time.Sleep(100 * time.Millisecond)
 }
 

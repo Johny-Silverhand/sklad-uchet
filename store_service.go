@@ -122,7 +122,7 @@ func htmlEscape(s string) string {
 func buildReportHTML(items []Item, filterDesc, generatedISO, generatedLocal string) string {
 	var b strings.Builder
 	b.WriteString(`<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"/>`)
-	b.WriteString(`<title>Отчёт — Склад Учёт</title>`)
+	b.WriteString(`<title>Отчёт — ` + appName + `</title>`)
 	b.WriteString(`<style>
 @page { size: A4; margin: 14mm; }
 * { box-sizing: border-box; }
@@ -144,7 +144,7 @@ tr.low td { background: #fff3cd; }
 </style></head><body>`)
 	b.WriteString(`<div class="noprint"><button onclick="window.print()">Печать</button> `)
 	b.WriteString(`<button onclick="window.close()">Закрыть</button></div>`)
-	b.WriteString(`<h1>Склад Учёт — отчёт</h1>`)
+	b.WriteString(`<h1>` + appName + ` — отчёт</h1>`)
 	b.WriteString(`<p class="meta">Дата: <strong>`)
 	b.WriteString(htmlEscape(generatedLocal))
 	b.WriteString(`</strong> <span style="color:#666">(`)

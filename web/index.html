@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Склад Учёт</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">СУ</div>
+        <div>
+          <div class="brand-title">Склад Учёт</div>
+          <div class="brand-sub">Victimok Labs</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="list">📦 Склад</button>
+        <button class="nav-btn" data-view="duplicates">🔗 Дубликаты</button>
+      </nav>
+      <div class="sidebar-stats" id="statsBox">
+        <div class="stat"><span>Позиций</span><b id="stItems">0</b></div>
+        <div class="stat"><span>Всего шт.</span><b id="stQty">0</b></div>
+      </div>
+      <div class="sidebar-foot" id="dbPath"></div>
+    </aside>
+
+    <main class="main">
+      <section id="view-list" class="view">
+        <header class="toolbar">
+          <div class="search-row">
+            <input id="qName" type="search" placeholder="Поиск по названию…" autocomplete="off" />
+            <input id="qCell" type="search" placeholder="Ячейка (A-12)…" autocomplete="off" />
+            <select id="qKind">
+              <option value="all">Все типы</option>
+              <option value="zapchast">Запчасть</option>
+              <option value="ustroystvo">Устройство</option>
+              <option value="komplektuyushchee">Комплектующее</option>
+            </select>
+          </div>
+          <button class="btn primary" id="btnAdd">+ Добавить</button>
+        </header>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>Тип</th>
+                <th>Кол-во</th>
+                <th>Ячейка</th>
+                <th>Артикул</th>
+                <th>Заметки</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="itemsBody"></tbody>
+          </table>
+          <div class="empty" id="emptyList" hidden>Ничего не найдено. Добавьте первую позицию.</div>
+        </div>
+      </section>
+
+      <section id="view-duplicates" class="view" hidden>
+        <header class="toolbar">
+          <h1>Дубликаты</h1>
+          <button class="btn" id="btnRefreshDups">Обновить</button>
+        </header>
+        <div id="dupsBox" class="dups"></div>
+        <div class="empty" id="emptyDups" hidden>Дубликатов нет — названия уникальны.</div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="itemDialog">
+    <form method="dialog" id="itemForm" class="dialog">
+      <h2 id="dlgTitle">Новая позиция</h2>
+      <input type="hidden" id="fId" />
+      <label>Название *
+        <input id="fName" required maxlength="200" />
+      </label>
+      <div class="row2">
+        <label>Тип *
+          <select id="fKind" required>
+            <option value="zapchast">Запчасть</option>
+            <option value="ustroystvo">Устройство</option>
+            <option value="komplektuyushchee">Комплектующее</option>
+          </select>
+        </label>
+        <label>Количество *
+          <input id="fQty" type="number" min="0" step="1" value="0" required />
+        </label>
+      </div>
+      <div class="row2">
+        <label>Ячейка
+          <input id="fCell" placeholder="A-12" maxlength="64" />
+        </label>
+        <label>Артикул (SKU)
+          <input id="fSku" maxlength="64" />
+        </label>
+      </div>
+      <label>Заметки
+        <textarea id="fNotes" rows="3" maxlength="2000"></textarea>
+      </label>
+      <div class="dlg-warn" id="dlgWarn" hidden></div>
+      <div class="dlg-actions">
+        <button type="button" class="btn" id="btnCancel">Отмена</button>
+        <button type="submit" class="btn primary" id="btnSave">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <div class="dialog">
+      <h2 id="confirmTitle">Подтверждение</h2>
+      <p id="confirmText"></p>
+      <div class="dlg-actions">
+        <button class="btn" id="confirmNo">Отмена</button>
+        <button class="btn danger" id="confirmYes">Удалить</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

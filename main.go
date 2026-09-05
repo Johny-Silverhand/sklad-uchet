@@ -22,7 +22,7 @@ var webFS embed.FS
 const (
 	appName     = "Склад Учёт"
 	appExeName  = "SkladUchet"
-	appVersion  = "1.2.2"
+	appVersion  = "1.2.3"
 	publisher   = "Victimok Labs"
 	uninstID    = "VictimokLabsSkladUchet"
 	creditLine  = "Разработано в Victimok Labs"

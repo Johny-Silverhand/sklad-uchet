@@ -16,8 +16,20 @@ const (
 	KindZapchast          = "zapchast"
 	KindUstroystvo        = "ustroystvo"
 	KindKomplektuyushchee = "komplektuyushchee"
-	schemaVersion         = 2
+
+	StorageBalance   = "balance"
+	StorageTemporary = "temporary"
+
+	schemaVersion = 3
 )
+
+type Theme struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	SortOrder int    `json:"sort_order"`
+	CreatedAt string `json:"created_at"`
+	ItemCount int    `json:"item_count"`
+}
 
 type Item struct {
 	ID        int64  `json:"id"`
@@ -28,6 +40,9 @@ type Item struct {
 	Cell      string `json:"cell"`
 	SKU       string `json:"sku"`
 	Notes     string `json:"notes"`
+	Storage   string `json:"storage"`
+	ThemeID   *int64 `json:"theme_id"`
+	ThemeName string `json:"theme_name"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	LowStock  bool   `json:"low_stock"`
@@ -57,12 +72,14 @@ type CellStat struct {
 }
 
 type Stats struct {
-	TotalItems int            `json:"total_items"`
-	TotalQty   int            `json:"total_qty"`
-	LowStock   int            `json:"low_stock"`
-	ByKind     map[string]int `json:"by_kind"`
-	QtyByKind  map[string]int `json:"qty_by_kind"`
-	TopCells   []CellStat     `json:"top_cells"`
+	TotalItems   int            `json:"total_items"`
+	TotalQty     int            `json:"total_qty"`
+	LowStock     int            `json:"low_stock"`
+	ByKind       map[string]int `json:"by_kind"`
+	QtyByKind    map[string]int `json:"qty_by_kind"`
+	ByStorage    map[string]int `json:"by_storage"`
+	QtyByStorage map[string]int `json:"qty_by_storage"`
+	TopCells     []CellStat     `json:"top_cells"`
 }
 
 type Store struct {
@@ -137,6 +154,12 @@ func (s *Store) migrate() error {
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS themes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -147,12 +170,16 @@ CREATE TABLE IF NOT EXISTS items (
   cell TEXT NOT NULL DEFAULT '',
   sku TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
+  storage TEXT NOT NULL DEFAULT 'balance' CHECK(storage IN ('balance','temporary')),
+  theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_items_name_norm ON items(name_norm);
 CREATE INDEX IF NOT EXISTS idx_items_cell ON items(cell);
 CREATE INDEX IF NOT EXISTS idx_items_kind ON items(kind);
+CREATE INDEX IF NOT EXISTS idx_items_storage ON items(storage);
+CREATE INDEX IF NOT EXISTS idx_items_theme ON items(theme_id);
 CREATE TABLE IF NOT EXISTS movements (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL,
@@ -183,6 +210,33 @@ CREATE INDEX IF NOT EXISTS idx_movements_created ON movements(created_at);
 				return err
 			}
 		}
+	}
+
+	if ver < 3 {
+		var hasStorage int
+		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='storage'`).Scan(&hasStorage)
+		if hasStorage == 0 {
+			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN storage TEXT NOT NULL DEFAULT 'balance'`); err != nil {
+				return err
+			}
+		}
+		var hasTheme int
+		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='theme_id'`).Scan(&hasTheme)
+		if hasTheme == 0 {
+			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL`); err != nil {
+				return err
+			}
+		}
+		if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_storage ON items(storage)`); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_items_theme ON items(theme_id)`); err != nil {
+			return err
+		}
+		// Never seed demo items. Existing DBs keep user data; fresh DBs stay empty.
+	}
+
+	if ver < schemaVersion {
 		if _, err := s.db.Exec(`DELETE FROM schema_version`); err != nil {
 			return err
 		}
@@ -224,13 +278,38 @@ func validKind(k string) bool {
 	return false
 }
 
-func scanItem(row interface{ Scan(dest ...any) error }) (Item, error) {
-	var it Item
-	err := row.Scan(&it.ID, &it.Name, &it.Kind, &it.Quantity, &it.MinQty, &it.Cell, &it.SKU, &it.Notes, &it.CreatedAt, &it.UpdatedAt)
-	if err == nil {
-		it.LowStock = it.MinQty > 0 && it.Quantity <= it.MinQty
+func validStorage(st string) bool {
+	switch st {
+	case StorageBalance, StorageTemporary:
+		return true
 	}
-	return it, err
+	return false
 }
 
-const itemCols = `id, name, kind, quantity, min_qty, cell, sku, notes, created_at, updated_at`
+func scanItem(row interface{ Scan(dest ...any) error }) (Item, error) {
+	var it Item
+	var themeID sql.NullInt64
+	var themeName sql.NullString
+	err := row.Scan(
+		&it.ID, &it.Name, &it.Kind, &it.Quantity, &it.MinQty, &it.Cell, &it.SKU, &it.Notes,
+		&it.Storage, &themeID, &themeName, &it.CreatedAt, &it.UpdatedAt,
+	)
+	if err != nil {
+		return it, err
+	}
+	if it.Storage == "" {
+		it.Storage = StorageBalance
+	}
+	if themeID.Valid {
+		id := themeID.Int64
+		it.ThemeID = &id
+		it.ThemeName = themeName.String
+	} else {
+		it.ThemeName = "Без темы"
+	}
+	it.LowStock = it.MinQty > 0 && it.Quantity <= it.MinQty
+	return it, nil
+}
+
+const itemCols = `i.id, i.name, i.kind, i.quantity, i.min_qty, i.cell, i.sku, i.notes, i.storage, i.theme_id, COALESCE(t.name, ''), i.created_at, i.updated_at`
+const itemFrom = `items i LEFT JOIN themes t ON t.id = i.theme_id`

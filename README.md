@@ -2,18 +2,43 @@
 
 Десктопное приложение для товароведа склада: учёт **запчастей**, **устройств** и **комплектующих**.
 
-Интерфейс на русском языке. Данные хранятся локально в SQLite (режим WAL).
+Интерфейс на русском языке. Данные хранятся **локально** в SQLite (режим WAL). Это **не** hosted web-приложение: UI встроен и показывается через Edge/Chrome в режиме `--app=`.
 
 **Разработано в Victimok Labs.**
 
 ## Возможности
 
 - CRUD: список, добавление, редактирование, удаление
-- Поиск по названию (подстрока) и по номеру ячейки (префикс)
-- Фильтр по типу: Запчасть / Устройство / Комплектующее
-- Предупреждение о дубликатах названий (нормализация: trim, lower, схлопывание пробелов)
-- Экран **«Дубликаты»**: группы совпадений и **объединение** (сумма количеств, лучший SKU/заметки; разные ячейки → основная + «Также: …» в заметках)
-- Win11-friendly UI: локальный HTTP + окно Edge/Chrome в режиме `--app=`
+- Поиск по названию и по номеру ячейки, фильтр по типу
+- **Мин. остаток** (`min_qty`) + фильтр «Мало на складе» + бейдж в списке
+- **Быстрая корректировка** количества (+/−) в строке
+- **Перемещение в ячейку**
+- **CSV экспорт / импорт** (UTF-8, разделитель `;`)
+- **Backup / restore** файла SQLite
+- **Обзор**: счётчики по типам, топ ячеек, число «мало»
+- Журнал **movements** (простые движения)
+- Предупреждение о дубликатах и экран **объединения** (сумма количеств, лучший SKU/заметки)
+- Тёмный Win11-friendly UI + установщик в стиле Victimok Labs (near-black / teal)
+
+## Установка на Windows 11
+
+1. Скачайте `SkladUchet-Setup.exe` из `dist/` (или Releases).
+2. Запустите двойным щелчком — откроется тёмный мастер установки Victimok Labs.
+3. Выберите папку, ярлыки (рабочий стол / меню Пуск) → «Установить».
+4. После установки запускайте ярлык **«Склад Учёт»** (режим `--app`).
+
+Нужен Microsoft Edge или Google Chrome.
+
+Удаление: «Удалить Склад Учёт» в меню Пуск или Параметры → Приложения. База в `%APPDATA%` сохраняется.
+
+Режимы одного exe:
+
+| Флаг | Назначение |
+|------|------------|
+| (по умолчанию) | `--setup`, если ещё не установлен; иначе `--app` |
+| `--setup` | мастер установки |
+| `--app` | обычный запуск приложения |
+| `--uninstall` | удаление |
 
 ## Поля позиции
 
@@ -22,23 +47,23 @@
 | название | name |
 | тип | `zapchast` / `ustroystvo` / `komplektuyushchee` |
 | кол-во | целое ≥ 0 |
-| ячейка | строковый номер, например `A-12` |
-| артикул | SKU (опционально) |
+| мин. остаток | `min_qty`, по умолчанию 0 |
+| ячейка | например `A-12` |
+| артикул | SKU |
 | заметки | опционально |
-| created_at / updated_at | автоматически |
 
 ## Где лежит база
 
-- **Windows:** `%APPDATA%/VictimokLabs/SkladUchet/sklad.db`
-- **Linux / macOS:** `~/.local/share/VictimokLabs/SkladUchet/sklad.db` (или `$XDG_DATA_HOME/...`)
+- **Windows:** `%APPDATA%\\VictimokLabs\\SkladUchet\\sklad.db`
+- **Linux / macOS:** `~/.local/share/VictimokLabs/SkladUchet/sklad.db`
 
-Индексы: нормализованное имя (`name_norm`), ячейка (`cell`). Включён `PRAGMA journal_mode=WAL`.
+Миграции: таблица `schema_version`, колонка `min_qty`, таблица `movements`.
 
 ## Требования
 
-- Go **1.23+**
-- Windows 11: Microsoft Edge или Google Chrome (для окна приложения)
-- CGO **не нужен** — используется `modernc.org/sqlite` (pure Go)
+- Go **1.23+** (для сборки)
+- Windows 11: Edge или Chrome
+- CGO **не нужен** — `modernc.org/sqlite`
 
 ## Запуск из исходников
 
@@ -46,69 +71,56 @@
 git clone https://github.com/Johny-Silverhand/sklad-uchet.git
 cd sklad-uchet
 go mod tidy
-go run .
+go run . --app -no-browser -addr 127.0.0.1:17890
 ```
 
-Флаги:
+Откройте `http://127.0.0.1:17890/` в браузере.
 
-- `-no-browser` — только сервер (удобно для отладки в браузере)
-- `-addr 127.0.0.1:17890` — фиксированный порт
-
-Пример без окна:
+## Сборка установщика Windows
 
 ```bash
-go run . -no-browser -addr 127.0.0.1:17890
+./scripts/build-windows.sh
 ```
 
-Откройте в браузере адрес, который выведет программа (например `http://127.0.0.1:17890/`).
-
-## Сборка .exe для Windows 11
-
-На любой ОС с Go (кросс-компиляция):
+Или вручную:
 
 ```bash
 mkdir -p dist
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o dist/SkladUchet.exe .
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o dist/SkladUchet-Setup.exe .
 ```
 
-- `-H windowsgui` скрывает консольное окно (только Windows).
-- Для отладки с консолью уберите `-H windowsgui`.
+Готовые файлы:
 
-Готовый файл: `dist/SkladUchet.exe`. Скопируйте на ПК с Windows 11 и запустите двойным щелчком. Нужен Edge или Chrome.
-
-Сборка **на** Windows:
-
-```powershell
-go build -ldflags="-s -w -H windowsgui" -o dist/SkladUchet.exe .
-```
-
-## Ключевые файлы
-
-| Файл | Назначение |
-|------|------------|
-| `main.go` | HTTP-сервер + embed UI |
-| `store_db.go` / `store_crud.go` / `store_dups.go` | SQLite WAL, CRUD, merge |
-| `api.go` | REST API |
-| `browser.go` | Edge/Chrome `--app=` |
-| `web/` | UI на русском |
-
-## Стек
-
-- **Go** + **modernc.org/sqlite** (без CGO)
-- встроенный HTML/CSS/JS (`embed`)
-- Edge/Chrome `--app=` (как ochag desktop/win)
+- `dist/SkladUchet-Setup.exe` — установщик + приложение (один бинарник)
+- `dist/SkladUchet.exe` — то же (алиас)
+- `dist/SkladUchet-console.exe` — с консолью (отладка)
 
 ## API (локально)
 
 | Метод | Путь | Описание |
 |-------|------|----------|
-| GET | `/api/items?q=&cell=&kind=` | список / поиск |
-| POST | `/api/items` | создать (`force: true` — игнор дублей) |
+| GET | `/api/items?q=&cell=&kind=&low=1` | список / поиск / мало |
+| POST | `/api/items` | создать |
 | PUT | `/api/items/{id}` | обновить |
+| POST | `/api/items/{id}/adjust` | `{ "delta": ±1 }` |
+| POST | `/api/items/{id}/move` | `{ "cell": "B-12" }` |
 | DELETE | `/api/items/{id}` | удалить |
 | GET | `/api/duplicates` | группы дубликатов |
-| POST | `/api/duplicates/merge` | `{ "primary_id": 1, "other_ids": [2,3] }` |
+| POST | `/api/duplicates/merge` | объединение |
+| GET | `/api/export.csv` | экспорт CSV |
+| POST | `/api/import.csv` | импорт (multipart `file` или body) |
+| POST | `/api/backup` | `{ "path": "" }` |
+| POST | `/api/restore` | `{ "path": "..." }` |
+| GET | `/api/stats` | обзор |
+| GET | `/api/movements` | журнал |
+
+## Стек
+
+- **Go** — сервер, установщик, бизнес-логика
+- **modernc.org/sqlite** — локальная БД без CGO
+- **embed HTML/CSS/JS** — UI приложения и мастера установки
+- **Edge/Chrome `--app=`** — окно как у десктоп-приложения
 
 ## Лицензия
 
-© Victimok Labs. Использование по согласованию с автором репозитория.
+© Victimok Labs. **Разработано в Victimok Labs.** Использование по согласованию с автором репозитория. См. файл `LICENSE`.

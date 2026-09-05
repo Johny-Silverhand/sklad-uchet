@@ -41,7 +41,7 @@ func openAppWindow(url, mode string) (*exec.Cmd, error) {
 		for _, bin := range candidates {
 			if st, err := os.Stat(bin); err == nil && !st.IsDir() {
 				cmd := exec.Command(bin, args...)
-				cmd.SysProcAttr = hideWindow()
+				cmd.SysProcAttr = showWindow()
 				if err := cmd.Start(); err != nil {
 					return nil, err
 				}
@@ -49,7 +49,7 @@ func openAppWindow(url, mode string) (*exec.Cmd, error) {
 			}
 		}
 		cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-		cmd.SysProcAttr = hideWindow()
+		cmd.SysProcAttr = showWindow()
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}

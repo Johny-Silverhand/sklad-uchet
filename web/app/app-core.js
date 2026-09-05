@@ -68,12 +68,17 @@ async function loadThemes() {
 function fillThemeSelects() {
   const q = $("#qTheme");
   const f = $("#fTheme");
+  const r = $("#rptTheme");
   const qVal = q.value;
   const fVal = f.value;
-  q.innerHTML = `<option value="all">Все темы</option><option value="none">Без темы</option>` +
-    themesCache.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
-  f.innerHTML = `<option value="">Без темы</option>` +
-    themesCache.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+  const rVal = r ? r.value : "all";
+  const themeOpts = themesCache.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+  q.innerHTML = `<option value="all">Все темы</option><option value="none">Без темы</option>` + themeOpts;
+  f.innerHTML = `<option value="">Без темы</option>` + themeOpts;
+  if (r) {
+    r.innerHTML = `<option value="all">Все</option><option value="none">Без темы</option>` + themeOpts;
+    if ([...r.options].some((o) => o.value === rVal)) r.value = rVal;
+  }
   if ([...q.options].some((o) => o.value === qVal)) q.value = qVal;
   if ([...f.options].some((o) => o.value === fVal)) f.value = fVal;
 }

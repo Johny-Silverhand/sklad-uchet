@@ -5,20 +5,30 @@ import (
 	"strings"
 )
 
-func (s *Store) List(kind, qName, qCell string) ([]Item, error) {
+type ListFilter struct {
+	Kind     string
+	QName    string
+	QCell    string
+	LowStock bool
+}
+
+func (s *Store) List(f ListFilter) ([]Item, error) {
 	where := []string{"1=1"}
 	args := []any{}
-	if kind != "" && kind != "all" {
+	if f.Kind != "" && f.Kind != "all" {
 		where = append(where, "kind = ?")
-		args = append(args, kind)
+		args = append(args, f.Kind)
 	}
-	if n := strings.TrimSpace(qName); n != "" {
+	if n := strings.TrimSpace(f.QName); n != "" {
 		where = append(where, "name_norm LIKE ?")
 		args = append(args, "%"+NormalizeName(n)+"%")
 	}
-	if c := strings.TrimSpace(qCell); c != "" {
+	if c := strings.TrimSpace(f.QCell); c != "" {
 		where = append(where, "UPPER(cell) LIKE ?")
 		args = append(args, strings.ToUpper(c)+"%")
+	}
+	if f.LowStock {
+		where = append(where, "min_qty > 0 AND quantity <= min_qty")
 	}
 	query := fmt.Sprintf(`SELECT %s FROM items WHERE %s ORDER BY name_norm ASC, id ASC`, itemCols, strings.Join(where, " AND "))
 	rows, err := s.db.Query(query, args...)
@@ -66,13 +76,14 @@ func (s *Store) FindByNorm(norm string, excludeID int64) ([]Item, error) {
 }
 
 type UpsertInput struct {
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Quantity  int    `json:"quantity"`
-	Cell      string `json:"cell"`
-	SKU       string `json:"sku"`
-	Notes     string `json:"notes"`
-	Force     bool   `json:"force"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	Quantity int    `json:"quantity"`
+	MinQty   int    `json:"min_qty"`
+	Cell     string `json:"cell"`
+	SKU      string `json:"sku"`
+	Notes    string `json:"notes"`
+	Force    bool   `json:"force"`
 }
 
 func (s *Store) Create(in UpsertInput) (Item, []Item, error) {
@@ -86,6 +97,9 @@ func (s *Store) Create(in UpsertInput) (Item, []Item, error) {
 	if in.Quantity < 0 {
 		return Item{}, nil, fmt.Errorf("количество не может быть отрицательным")
 	}
+	if in.MinQty < 0 {
+		return Item{}, nil, fmt.Errorf("мин. остаток не может быть отрицательным")
+	}
 	norm := NormalizeName(name)
 	dups, err := s.FindByNorm(norm, 0)
 	if err != nil {
@@ -96,14 +110,15 @@ func (s *Store) Create(in UpsertInput) (Item, []Item, error) {
 	}
 	ts := nowISO()
 	res, err := s.db.Exec(`
-INSERT INTO items (name, name_norm, kind, quantity, cell, sku, notes, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		name, norm, in.Kind, in.Quantity, strings.TrimSpace(in.Cell),
+INSERT INTO items (name, name_norm, kind, quantity, min_qty, cell, sku, notes, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, norm, in.Kind, in.Quantity, in.MinQty, strings.TrimSpace(in.Cell),
 		strings.TrimSpace(in.SKU), strings.TrimSpace(in.Notes), ts, ts)
 	if err != nil {
 		return Item{}, nil, err
 	}
 	id, _ := res.LastInsertId()
+	_ = s.addMovement(id, "create", in.Quantity, "", strings.TrimSpace(in.Cell), "создание")
 	it, err := s.Get(id)
 	return it, dups, err
 }
@@ -119,6 +134,13 @@ func (s *Store) Update(id int64, in UpsertInput) (Item, []Item, error) {
 	if in.Quantity < 0 {
 		return Item{}, nil, fmt.Errorf("количество не может быть отрицательным")
 	}
+	if in.MinQty < 0 {
+		return Item{}, nil, fmt.Errorf("мин. остаток не может быть отрицательным")
+	}
+	old, err := s.Get(id)
+	if err != nil {
+		return Item{}, nil, fmt.Errorf("запись не найдена")
+	}
 	norm := NormalizeName(name)
 	dups, err := s.FindByNorm(norm, id)
 	if err != nil {
@@ -129,9 +151,9 @@ func (s *Store) Update(id int64, in UpsertInput) (Item, []Item, error) {
 	}
 	ts := nowISO()
 	res, err := s.db.Exec(`
-UPDATE items SET name=?, name_norm=?, kind=?, quantity=?, cell=?, sku=?, notes=?, updated_at=?
+UPDATE items SET name=?, name_norm=?, kind=?, quantity=?, min_qty=?, cell=?, sku=?, notes=?, updated_at=?
 WHERE id=?`,
-		name, norm, in.Kind, in.Quantity, strings.TrimSpace(in.Cell),
+		name, norm, in.Kind, in.Quantity, in.MinQty, strings.TrimSpace(in.Cell),
 		strings.TrimSpace(in.SKU), strings.TrimSpace(in.Notes), ts, id)
 	if err != nil {
 		return Item{}, nil, err
@@ -140,11 +162,20 @@ WHERE id=?`,
 	if n == 0 {
 		return Item{}, nil, fmt.Errorf("запись не найдена")
 	}
+	delta := in.Quantity - old.Quantity
+	if delta != 0 || strings.TrimSpace(in.Cell) != old.Cell {
+		note := "редактирование"
+		_ = s.addMovement(id, "edit", delta, old.Cell, strings.TrimSpace(in.Cell), note)
+	}
 	it, err := s.Get(id)
 	return it, dups, err
 }
 
 func (s *Store) Delete(id int64) error {
+	old, err := s.Get(id)
+	if err != nil {
+		return fmt.Errorf("запись не найдена")
+	}
 	res, err := s.db.Exec(`DELETE FROM items WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -153,6 +184,6 @@ func (s *Store) Delete(id int64) error {
 	if n == 0 {
 		return fmt.Errorf("запись не найдена")
 	}
+	_ = s.addMovement(id, "delete", -old.Quantity, old.Cell, "", "удаление «"+old.Name+"»")
 	return nil
 }
-

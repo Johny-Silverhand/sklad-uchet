@@ -1,8 +1,8 @@
-# Склад Учёт
+# Точка Склада
 
 Десктопное приложение для товароведа склада: учёт **запчастей**, **устройств** и **комплектующих**.
 
-Интерфейс на русском. Данные **локально** в SQLite (WAL). На Windows — **нативное окно WebView2** (без адресной строки и хрома браузера), заголовок «Склад Учёт». HTTP только на `127.0.0.1` внутри процесса.
+Интерфейс на русском. Данные **локально** в SQLite (WAL). На Windows — **нативное окно WebView2** (без адресной строки и хрома браузера), заголовок «Точка Склада». HTTP только на `127.0.0.1` внутри процесса.
 
 **Разработано в Victimok Labs.**
 
@@ -13,20 +13,21 @@
 - CRUD позиций, поиск по названию и ячейке, фильтр по типу и теме
 - **Мин. остаток** + «Мало на складе», быстрые +/−, перенос между балансом и временным
 - CSV экспорт/импорт (поля включая `storage`, `theme`), backup/restore SQLite
+- **Сервис**: печатные отчёты, integrity/VACUUM, папка данных, очистка журнала, ячейки с несколькими позициями
 - Дубликаты и объединение, обзор, журнал movements
 - Пустая БД при первом запуске (**без демо-данных**)
-- Тёмный UI + **SkladUchet-Setup.exe** (мастер установки, ярлыки, uninstall)
+- Тёмный UI + **TochkaSklada-Setup.exe** (мастер установки, ярлыки, uninstall)
 
 ## Установка на Windows 11
 
-1. Скачайте `SkladUchet-Setup.exe` из `dist/` (или Releases).
+1. Скачайте `TochkaSklada-Setup.exe` из `dist/` (или Releases).
 2. Запустите двойным щелчком — откроется тёмный мастер установки Victimok Labs.
 3. Выберите папку, ярлыки (рабочий стол / меню Пуск) → «Установить».
-4. После установки запускайте ярлык **«Склад Учёт»** (режим `--app`).
+4. После установки запускайте ярлык **«Точка Склада»** (режим `--app`).
 
 Нужен **Microsoft Edge WebView2 Runtime** (предустановлен на актуальных Windows 10/11).
 
-Удаление: «Удалить Склад Учёт» в меню Пуск или Параметры → Приложения. База в `%APPDATA%` сохраняется.
+Удаление: «Удалить Точка Склада» в меню Пуск или Параметры → Приложения. База в `%APPDATA%` сохраняется.
 
 Режимы одного exe:
 
@@ -53,7 +54,7 @@
 
 ## Где лежит база
 
-- **Windows:** `%APPDATA%\\VictimokLabs\\SkladUchet\\sklad.db`
+- **Windows:** `%APPDATA%\VictimokLabs\SkladUchet\sklad.db`
 - **Linux / macOS:** `~/.local/share/VictimokLabs/SkladUchet/sklad.db`
 
 Миграции: `schema_version` (v3), `storage`/`theme_id`, таблица `themes`, `movements`. Демо-seed отсутствует.
@@ -85,14 +86,14 @@ go run . --app -no-browser -addr 127.0.0.1:17890
 
 ```bash
 mkdir -p dist
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o dist/SkladUchet-Setup.exe .
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o dist/TochkaSklada-Setup.exe .
 ```
 
 Готовые файлы:
 
-- `dist/SkladUchet-Setup.exe` — установщик + приложение (один бинарник)
-- `dist/SkladUchet.exe` — то же (алиас)
-- `dist/SkladUchet-console.exe` — с консолью (отладка)
+- `dist/TochkaSklada-Setup.exe` — установщик + приложение (один бинарник)
+- `dist/TochkaSklada.exe` — то же (алиас)
+- `dist/TochkaSklada-console.exe` — с консолью (отладка)
 
 ## API (локально)
 

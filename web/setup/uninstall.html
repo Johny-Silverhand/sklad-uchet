@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Удаление · Склад Учёт · Victimok Labs</title>
+  <style>
+    :root { --accent:#7ee8d3; --ink:#e8f4f1; --muted:#8aa39c; --panel:#0c1014; --line:rgba(126,232,211,.16); --danger:#e07a72; }
+    body { margin:0; min-height:100dvh; display:grid; place-items:center; font-family:"Segoe UI",system-ui,sans-serif;
+      background:linear-gradient(180deg,#05070a,#0a1014); color:var(--ink); }
+    .box { width:min(480px,calc(100vw - 32px)); background:var(--panel); border:1px solid var(--line); padding:28px; }
+    h1 { margin:0 0 8px; font-size:22px; font-weight:500; }
+    p { color:var(--muted); line-height:1.5; }
+    .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+    button { height:40px; padding:0 16px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; }
+    .danger { background:var(--danger); border-color:var(--danger); color:#1a0a0a; font-weight:600; }
+    .credit { margin-top:18px; font-size:11px; color:#5d736e; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Удалить «Склад Учёт»?</h1>
+    <p>Будут удалены ярлыки и файлы программы. База данных в %APPDATA%\VictimokLabs\SkladUchet сохранится.</p>
+    <div class="actions">
+      <button type="button" onclick="window.close()">Отмена</button>
+      <button type="button" class="danger" id="go">Удалить</button>
+    </div>
+    <div class="credit">Разработано в Victimok Labs</div>
+  </div>
+  <script>
+    document.getElementById("go").onclick = async () => {
+      await fetch("/api/uninstall", { method: "POST" });
+      document.querySelector("h1").textContent = "Удаление…";
+    };
+  </script>
+</body>
+</html>

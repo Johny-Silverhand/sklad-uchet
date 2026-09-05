@@ -27,6 +27,7 @@ func (a *api) mount(mux *http.ServeMux) {
 	mux.HandleFunc("/api/backup", a.backup)
 	mux.HandleFunc("/api/restore", a.restore)
 	mux.HandleFunc("/api/movements", a.movements)
+	a.serviceRoutes(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -410,15 +411,34 @@ func (a *api) restore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) movements(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		list, err := a.store.RecentMovements(limit)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"movements": list})
+	case http.MethodDelete:
+		n, err := a.store.ClearMovements()
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "deleted": n})
+	case http.MethodPost:
+		if r.URL.Query().Get("clear") != "1" && r.URL.Query().Get("action") != "clear" {
+			writeJSON(w, 400, map[string]string{"error": "Укажите clear=1 для очистки журнала"})
+			return
+		}
+		n, err := a.store.ClearMovements()
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "deleted": n})
+	default:
 		http.Error(w, "method", http.StatusMethodNotAllowed)
-		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	list, err := a.store.RecentMovements(limit)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, 200, map[string]any{"movements": list})
 }

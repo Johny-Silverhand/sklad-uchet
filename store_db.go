@@ -13,22 +13,24 @@ import (
 )
 
 const (
-	KindZapchast         = "zapchast"
-	KindUstroystvo       = "ustroystvo"
+	KindZapchast          = "zapchast"
+	KindUstroystvo        = "ustroystvo"
 	KindKomplektuyushchee = "komplektuyushchee"
+	schemaVersion         = 2
 )
-
 
 type Item struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	Quantity  int    `json:"quantity"`
+	MinQty    int    `json:"min_qty"`
 	Cell      string `json:"cell"`
 	SKU       string `json:"sku"`
 	Notes     string `json:"notes"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	LowStock  bool   `json:"low_stock"`
 }
 
 type DuplicateGroup struct {
@@ -37,8 +39,35 @@ type DuplicateGroup struct {
 	TotalQty       int    `json:"total_qty"`
 }
 
+type Movement struct {
+	ID        int64  `json:"id"`
+	ItemID    int64  `json:"item_id"`
+	Kind      string `json:"kind"`
+	Delta     int    `json:"delta"`
+	FromCell  string `json:"from_cell"`
+	ToCell    string `json:"to_cell"`
+	Note      string `json:"note"`
+	CreatedAt string `json:"created_at"`
+}
+
+type CellStat struct {
+	Cell  string `json:"cell"`
+	Count int    `json:"count"`
+	Qty   int    `json:"qty"`
+}
+
+type Stats struct {
+	TotalItems int            `json:"total_items"`
+	TotalQty   int            `json:"total_qty"`
+	LowStock   int            `json:"low_stock"`
+	ByKind     map[string]int `json:"by_kind"`
+	QtyByKind  map[string]int `json:"qty_by_kind"`
+	TopCells   []CellStat     `json:"top_cells"`
+}
+
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbPath string
 }
 
 func dataDir() (string, error) {
@@ -88,7 +117,7 @@ func OpenStore() (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, dbPath: dbPath}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -104,13 +133,17 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
+CREATE TABLE IF NOT EXISTS schema_version (
+  version INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   name_norm TEXT NOT NULL,
   kind TEXT NOT NULL CHECK(kind IN ('zapchast','ustroystvo','komplektuyushchee')),
   quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),
+  min_qty INTEGER NOT NULL DEFAULT 0 CHECK(min_qty >= 0),
   cell TEXT NOT NULL DEFAULT '',
   sku TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
@@ -120,8 +153,44 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS idx_items_name_norm ON items(name_norm);
 CREATE INDEX IF NOT EXISTS idx_items_cell ON items(cell);
 CREATE INDEX IF NOT EXISTS idx_items_kind ON items(kind);
-`)
-	return err
+CREATE TABLE IF NOT EXISTS movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  delta INTEGER NOT NULL DEFAULT 0,
+  from_cell TEXT NOT NULL DEFAULT '',
+  to_cell TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_movements_item ON movements(item_id);
+CREATE INDEX IF NOT EXISTS idx_movements_created ON movements(created_at);
+`); err != nil {
+		return err
+	}
+
+	var ver int
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&ver)
+	if err != nil {
+		return err
+	}
+
+	if ver < 2 {
+		var hasMin int
+		_ = s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name='min_qty'`).Scan(&hasMin)
+		if hasMin == 0 {
+			if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return err
+			}
+		}
+		if _, err := s.db.Exec(`DELETE FROM schema_version`); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`INSERT INTO schema_version(version) VALUES (?)`, schemaVersion); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func NormalizeName(name string) string {
@@ -157,9 +226,11 @@ func validKind(k string) bool {
 
 func scanItem(row interface{ Scan(dest ...any) error }) (Item, error) {
 	var it Item
-	err := row.Scan(&it.ID, &it.Name, &it.Kind, &it.Quantity, &it.Cell, &it.SKU, &it.Notes, &it.CreatedAt, &it.UpdatedAt)
+	err := row.Scan(&it.ID, &it.Name, &it.Kind, &it.Quantity, &it.MinQty, &it.Cell, &it.SKU, &it.Notes, &it.CreatedAt, &it.UpdatedAt)
+	if err == nil {
+		it.LowStock = it.MinQty > 0 && it.Quantity <= it.MinQty
+	}
 	return it, err
 }
 
-const itemCols = `id, name, kind, quantity, cell, sku, notes, created_at, updated_at`
-
+const itemCols = `id, name, kind, quantity, min_qty, cell, sku, notes, created_at, updated_at`

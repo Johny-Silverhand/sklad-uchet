@@ -11,12 +11,30 @@ async function loadMovements() {
   }
 }
 
+function setListHeaders() {
+  if (currentStorage === "balance") {
+    $("#listTitle").textContent = "Баланс";
+    $("#listSubtitle").textContent = "Постоянное хранение на складе";
+  } else {
+    $("#listTitle").textContent = "Временное хранение";
+    $("#listSubtitle").textContent = "Позиции на временном складе";
+  }
+}
+
 function switchView(name) {
   $$(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
-  $("#view-list").hidden = name !== "list";
+  const isList = name === "balance" || name === "temporary";
+  $("#view-list").hidden = !isList;
+  $("#view-themes").hidden = name !== "themes";
   $("#view-overview").hidden = name !== "overview";
   $("#view-duplicates").hidden = name !== "duplicates";
   $("#view-tools").hidden = name !== "tools";
+  if (name === "balance" || name === "temporary") {
+    currentStorage = name === "balance" ? "balance" : "temporary";
+    setListHeaders();
+    loadItems().catch((e) => toast(e.message, "err"));
+  }
+  if (name === "themes") renderThemesView().catch((e) => toast(e.message, "err"));
   if (name === "duplicates") loadDuplicates().catch((e) => toast(e.message, "err"));
   if (name === "overview") loadOverview().catch((e) => toast(e.message, "err"));
   if (name === "tools") loadMovements().catch(() => {});
@@ -37,6 +55,26 @@ function bind() {
   $("#itemForm").addEventListener("submit", saveItem);
   $("#btnRefreshDups").addEventListener("click", () => loadDuplicates().catch((e) => toast(e.message, "err")));
   $("#moveCancel").addEventListener("click", () => $("#moveDialog").close());
+  $("#themeCancel").addEventListener("click", () => $("#themeDialog").close());
+  $("#btnAddTheme").addEventListener("click", () => openThemeDialog(null));
+  $("#themeForm").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const id = $("#thId").value;
+    const payload = { name: $("#thName").value, sort_order: Number($("#thSort").value) || 0 };
+    try {
+      if (id) {
+        await api("/api/themes/" + id, { method: "PUT", body: JSON.stringify(payload) });
+        toast("Тема обновлена", "ok");
+      } else {
+        await api("/api/themes", { method: "POST", body: JSON.stringify(payload) });
+        toast("Тема создана", "ok");
+      }
+      $("#themeDialog").close();
+      await renderThemesView();
+      fillThemeSelects();
+    } catch (e) { toast(e.message, "err"); }
+  });
+
   $("#moveForm").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const id = $("#moveId").value;
@@ -53,6 +91,7 @@ function bind() {
   $("#qName").addEventListener("input", reload);
   $("#qCell").addEventListener("input", reload);
   $("#qKind").addEventListener("change", reload);
+  $("#qTheme").addEventListener("change", reload);
   $("#qLow").addEventListener("change", reload);
 
   $("#itemsBody").addEventListener("click", async (ev) => {
@@ -60,12 +99,24 @@ function bind() {
     const edit = ev.target.closest("[data-edit]");
     const del = ev.target.closest("[data-del]");
     const move = ev.target.closest("[data-move]");
+    const stor = ev.target.closest("[data-storage]");
     if (adj) {
       try {
         await api("/api/items/" + adj.dataset.adj + "/adjust", {
           method: "POST",
           body: JSON.stringify({ delta: Number(adj.dataset.delta) }),
         });
+        await Promise.all([loadItems(), loadStats()]);
+      } catch (e) { toast(e.message, "err"); }
+      return;
+    }
+    if (stor) {
+      try {
+        await api("/api/items/" + stor.dataset.storage + "/storage", {
+          method: "POST",
+          body: JSON.stringify({ storage: stor.dataset.to }),
+        });
+        toast(stor.dataset.to === "balance" ? "Перенесено на баланс" : "Во временное хранение", "ok");
         await Promise.all([loadItems(), loadStats()]);
       } catch (e) { toast(e.message, "err"); }
       return;
@@ -88,7 +139,7 @@ function bind() {
       const id = del.dataset.del;
       const row = del.closest("tr");
       const name = row?.querySelector("strong")?.textContent || id;
-      if (!(await confirmDelete(id, name))) return;
+      if (!(await confirmDelete(id, name, "позицию"))) return;
       try {
         await api("/api/items/" + id, { method: "DELETE" });
         toast("Удалено", "ok");
@@ -97,8 +148,36 @@ function bind() {
     }
   });
 
-  ["fName", "fKind", "fQty", "fMin", "fCell", "fSku", "fNotes"].forEach((id) => {
-    $("#" + id).addEventListener("input", () => {
+  $("#themesBox").addEventListener("click", async (ev) => {
+    const edit = ev.target.closest("[data-edit-theme]");
+    const del = ev.target.closest("[data-del-theme]");
+    if (edit) {
+      const t = themesCache.find((x) => String(x.id) === edit.dataset.editTheme);
+      if (t) openThemeDialog(t);
+      return;
+    }
+    if (del) {
+      const t = themesCache.find((x) => String(x.id) === del.dataset.delTheme);
+      if (!t) return;
+      if (!(await confirmDelete(t.id, t.name, "тему"))) return;
+      try {
+        await api("/api/themes/" + t.id, { method: "DELETE" });
+        toast("Тема удалена", "ok");
+        await renderThemesView();
+        fillThemeSelects();
+      } catch (e) { toast(e.message, "err"); }
+    }
+  });
+
+  ["fName", "fKind", "fStorage", "fQty", "fMin", "fCell", "fSku", "fNotes", "fTheme"].forEach((id) => {
+    const el = $("#" + id);
+    if (!el) return;
+    el.addEventListener("input", () => {
+      forceSave = false;
+      $("#btnSave").textContent = "Сохранить";
+      $("#dlgWarn").hidden = true;
+    });
+    el.addEventListener("change", () => {
       forceSave = false;
       $("#btnSave").textContent = "Сохранить";
       $("#dlgWarn").hidden = true;
@@ -115,7 +194,7 @@ function bind() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка импорта");
       toast(`Импорт: +${data.created} / ~${data.updated} / skip ${data.skipped}`, "ok");
-      await Promise.all([loadItems(), loadStats()]);
+      await Promise.all([loadThemes(), loadItems(), loadStats()]);
     } catch (e) { toast(e.message, "err"); }
     ev.target.value = "";
   });
@@ -135,7 +214,7 @@ function bind() {
     try {
       await api("/api/restore", { method: "POST", body: JSON.stringify({ path }) });
       toast("Восстановлено", "ok");
-      await Promise.all([loadItems(), loadStats(), loadHealth()]);
+      await Promise.all([loadThemes(), loadItems(), loadStats(), loadHealth()]);
     } catch (e) { toast(e.message, "err"); }
   });
 
@@ -143,9 +222,10 @@ function bind() {
 }
 
 async function init() {
-  document.title = "Склад Учёт · Victimok Labs";
+  document.title = "Склад Учёт";
   bind();
-  await Promise.all([loadHealth(), loadStats(), loadItems()]);
+  setListHeaders();
+  await Promise.all([loadHealth(), loadThemes(), loadStats(), loadItems()]);
 }
 
 init().catch((e) => toast(e.message || String(e), "err"));

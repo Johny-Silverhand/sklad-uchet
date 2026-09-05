@@ -101,6 +101,7 @@ func (s *Store) Merge(primaryID int64, otherIDs []int64) (Item, error) {
 	}
 
 	qty := primary.Quantity
+	minQty := primary.MinQty
 	sku := primary.SKU
 	notes := primary.Notes
 	cell := primary.Cell
@@ -109,6 +110,9 @@ func (s *Store) Merge(primaryID int64, otherIDs []int64) (Item, error) {
 
 	for _, o := range others {
 		qty += o.Quantity
+		if o.MinQty > minQty {
+			minQty = o.MinQty
+		}
 		sku = pickBest(sku, o.SKU)
 		if strings.TrimSpace(o.Cell) != "" && !strings.EqualFold(strings.TrimSpace(o.Cell), strings.TrimSpace(cell)) {
 			extraCells = append(extraCells, strings.TrimSpace(o.Cell))
@@ -145,8 +149,8 @@ func (s *Store) Merge(primaryID int64, otherIDs []int64) (Item, error) {
 	}
 
 	ts := nowISO()
-	_, err = tx.Exec(`UPDATE items SET quantity=?, sku=?, notes=?, cell=?, kind=?, updated_at=? WHERE id=?`,
-		qty, sku, notes, cell, kind, ts, primaryID)
+	_, err = tx.Exec(`UPDATE items SET quantity=?, min_qty=?, sku=?, notes=?, cell=?, kind=?, updated_at=? WHERE id=?`,
+		qty, minQty, sku, notes, cell, kind, ts, primaryID)
 	if err != nil {
 		return Item{}, err
 	}
@@ -154,6 +158,13 @@ func (s *Store) Merge(primaryID int64, otherIDs []int64) (Item, error) {
 		if _, err := tx.Exec(`DELETE FROM items WHERE id=?`, o.ID); err != nil {
 			return Item{}, err
 		}
+	}
+	if _, err := tx.Exec(`
+INSERT INTO movements (item_id, kind, delta, from_cell, to_cell, note, created_at)
+VALUES (?, 'merge', ?, ?, ?, ?, ?)`,
+		primaryID, qty-primary.Quantity, primary.Cell, cell,
+		fmt.Sprintf("объединение %d записей", len(others)+1), ts); err != nil {
+		return Item{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Item{}, err
@@ -166,33 +177,60 @@ func getTx(tx *sql.Tx, id int64) (Item, error) {
 	return scanItem(row)
 }
 
-func (s *Store) Stats() (map[string]int, error) {
+func (s *Store) Stats() (Stats, error) {
+	out := Stats{
+		ByKind: map[string]int{
+			KindZapchast: 0, KindUstroystvo: 0, KindKomplektuyushchee: 0,
+		},
+		QtyByKind: map[string]int{
+			KindZapchast: 0, KindUstroystvo: 0, KindKomplektuyushchee: 0,
+		},
+		TopCells: []CellStat{},
+	}
 	rows, err := s.db.Query(`SELECT kind, COUNT(*), COALESCE(SUM(quantity),0) FROM items GROUP BY kind`)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]int{
-		"total_items": 0,
-		"total_qty":   0,
-		"zapchast":    0,
-		"ustroystvo":  0,
-		"komplektuyushchee": 0,
+		return out, err
 	}
 	for rows.Next() {
 		var kind string
 		var cnt, qty int
 		if err := rows.Scan(&kind, &cnt, &qty); err != nil {
-			return nil, err
+			_ = rows.Close()
+			return out, err
 		}
-		out[kind] = cnt
-		out["total_items"] += cnt
-		out["total_qty"] += qty
+		out.ByKind[kind] = cnt
+		out.QtyByKind[kind] = qty
+		out.TotalItems += cnt
+		out.TotalQty += qty
 	}
-	return out, rows.Err()
+	_ = rows.Close()
+
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM items WHERE min_qty > 0 AND quantity <= min_qty`).Scan(&out.LowStock); err != nil {
+		return out, err
+	}
+
+	crows, err := s.db.Query(`
+SELECT cell, COUNT(*), COALESCE(SUM(quantity),0)
+FROM items WHERE TRIM(cell) != ''
+GROUP BY cell ORDER BY COUNT(*) DESC, SUM(quantity) DESC LIMIT 8`)
+	if err != nil {
+		return out, err
+	}
+	defer crows.Close()
+	for crows.Next() {
+		var cs CellStat
+		if err := crows.Scan(&cs.Cell, &cs.Count, &cs.Qty); err != nil {
+			return out, err
+		}
+		out.TopCells = append(out.TopCells, cs)
+	}
+	return out, crows.Err()
 }
 
 func (s *Store) DBPath() string {
+	if s.dbPath != "" {
+		return s.dbPath
+	}
 	dir, _ := dataDir()
 	return filepath.Join(dir, "sklad.db")
 }

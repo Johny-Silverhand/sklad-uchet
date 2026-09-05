@@ -173,7 +173,7 @@ VALUES (?, 'merge', ?, ?, ?, ?, ?)`,
 }
 
 func getTx(tx *sql.Tx, id int64) (Item, error) {
-	row := tx.QueryRow(`SELECT `+itemCols+` FROM items WHERE id = ?`, id)
+	row := tx.QueryRow(`SELECT `+itemCols+` FROM `+itemFrom+` WHERE i.id = ?`, id)
 	return scanItem(row)
 }
 
@@ -184,6 +184,12 @@ func (s *Store) Stats() (Stats, error) {
 		},
 		QtyByKind: map[string]int{
 			KindZapchast: 0, KindUstroystvo: 0, KindKomplektuyushchee: 0,
+		},
+		ByStorage: map[string]int{
+			StorageBalance: 0, StorageTemporary: 0,
+		},
+		QtyByStorage: map[string]int{
+			StorageBalance: 0, StorageTemporary: 0,
 		},
 		TopCells: []CellStat{},
 	}
@@ -204,6 +210,22 @@ func (s *Store) Stats() (Stats, error) {
 		out.TotalQty += qty
 	}
 	_ = rows.Close()
+
+	srows, err := s.db.Query(`SELECT storage, COUNT(*), COALESCE(SUM(quantity),0) FROM items GROUP BY storage`)
+	if err != nil {
+		return out, err
+	}
+	for srows.Next() {
+		var st string
+		var cnt, qty int
+		if err := srows.Scan(&st, &cnt, &qty); err != nil {
+			_ = srows.Close()
+			return out, err
+		}
+		out.ByStorage[st] = cnt
+		out.QtyByStorage[st] = qty
+	}
+	_ = srows.Close()
 
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM items WHERE min_qty > 0 AND quantity <= min_qty`).Scan(&out.LowStock); err != nil {
 		return out, err

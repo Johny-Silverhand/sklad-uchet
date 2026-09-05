@@ -29,7 +29,7 @@
 
 ## Где лежит база
 
-- **Windows:** `%APPDATA%\\VictimokLabs\\SkladUchet\\sklad.db`
+- **Windows:** `%APPDATA%/VictimokLabs/SkladUchet/sklad.db`
 - **Linux / macOS:** `~/.local/share/VictimokLabs/SkladUchet/sklad.db` (или `$XDG_DATA_HOME/...`)
 
 Индексы: нормализованное имя (`name_norm`), ячейка (`cell`). Включён `PRAGMA journal_mode=WAL`.
@@ -72,33 +72,38 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" 
 ```
 
 - `-H windowsgui` скрывает консольное окно (только Windows).
-- Для отладки с консолью уберите `-H windowsgui`:
+- Для отладки с консолью уберите `-H windowsgui`.
 
-```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/SkladUchet.exe .
-```
-
-Готовый файл: `dist/SkladUchet.exe`. Скопируйте на ПК с Windows 11 и запустите двойным щелчком. Нужен установленный Edge или Chrome.
+Готовый файл: `dist/SkladUchet.exe`. Скопируйте на ПК с Windows 11 и запустите двойным щелчком. Нужен Edge или Chrome.
 
 Сборка **на** Windows:
 
 ```powershell
-go build -ldflags="-s -w -H windowsgui" -o dist\\SkladUchet.exe .
+go build -ldflags="-s -w -H windowsgui" -o dist/SkladUchet.exe .
 ```
+
+## Ключевые файлы
+
+| Файл | Назначение |
+|------|------------|
+| `main.go` | HTTP-сервер + embed UI |
+| `store_db.go` / `store_crud.go` / `store_dups.go` | SQLite WAL, CRUD, merge |
+| `api.go` | REST API |
+| `browser.go` | Edge/Chrome `--app=` |
+| `web/` | UI на русском |
 
 ## Стек
 
-- **Go** — сервер и бизнес-логика
-- **modernc.org/sqlite** — локальная БД без CGO
-- **встроенный HTML/CSS/JS** (`embed`) — UI
-- **Edge/Chrome `--app=`** — окно как у десктоп-приложения (тот же подход, что у ochag desktop/win)
+- **Go** + **modernc.org/sqlite** (без CGO)
+- встроенный HTML/CSS/JS (`embed`)
+- Edge/Chrome `--app=` (как ochag desktop/win)
 
 ## API (локально)
 
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/api/items?q=&cell=&kind=` | список / поиск |
-| POST | `/api/items` | создать (`force: true` — игнор предупреждения о дублях) |
+| POST | `/api/items` | создать (`force: true` — игнор дублей) |
 | PUT | `/api/items/{id}` | обновить |
 | DELETE | `/api/items/{id}` | удалить |
 | GET | `/api/duplicates` | группы дубликатов |

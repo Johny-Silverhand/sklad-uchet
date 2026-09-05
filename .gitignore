@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/sklad-uchet
+/skladuchet
+/dist/*.exe
+!/dist/.gitkeep
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Go
+/vendor/
+*.test
+*.out
+coverage.*
+
+# Node (if any local tooling)
+node_modules/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local profiles / build
+/chromium-profile/
+*.syso

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -19,39 +20,55 @@ import (
 var webFS embed.FS
 
 const (
-	appName    = "Склад Учёт"
-	appVersion = "1.0.0"
-	publisher  = "Victimok Labs"
-	creditLine = "Разработано в Victimok Labs"
+	appName     = "Склад Учёт"
+	appExeName  = "SkladUchet"
+	appVersion  = "1.1.0"
+	publisher   = "Victimok Labs"
+	uninstID    = "VictimokLabsSkladUchet"
+	creditLine  = "Разработано в Victimok Labs"
+	defaultPort = "17890"
 )
 
 func main() {
 	noBrowser := flag.Bool("no-browser", false, "не открывать окно браузера")
-	addrFlag := flag.String("addr", "127.0.0.1:0", "адрес HTTP-сервера")
+	addrFlag := flag.String("addr", "", "адрес HTTP-сервера (по умолчанию 127.0.0.1:"+defaultPort+")")
 	flag.Parse()
 
-	store, err := OpenStore()
-	if err != nil {
-		fatal("База данных: " + err.Error())
-		return
+	mode := detectMode()
+	addr := *addrFlag
+	if addr == "" {
+		addr = "127.0.0.1:" + defaultPort
 	}
-	defer store.Close()
 
-	ln, err := net.Listen("tcp", *addrFlag)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fatal("Не удалось открыть порт: " + err.Error())
-		return
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fatal("Не удалось открыть порт: " + err.Error())
+			return
+		}
 	}
 
 	mux := http.NewServeMux()
-	(&api{store: store}).mount(mux)
+	attachInstallerAPI(mux, mode)
+
+	var store *Store
+	if mode == "app" {
+		store, err = OpenStore()
+		if err != nil {
+			fatal("База данных: " + err.Error())
+			return
+		}
+		defer store.Close()
+		(&api{store: store}).mount(mux)
+	}
 
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
 		fatal(err.Error())
 		return
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	mux.Handle("/", spaHandler(sub, mode))
 
 	srv := &http.Server{Handler: withCORS(mux)}
 	go func() {
@@ -60,14 +77,26 @@ func main() {
 		}
 	}()
 
-	url := "http://" + ln.Addr().String() + "/"
-	fmt.Println(appName, appVersion)
-	fmt.Println("UI:", url)
-	fmt.Println("DB:", store.DBPath())
+	base := "http://" + ln.Addr().String()
+	startURL := base + "/"
+	switch mode {
+	case "setup":
+		startURL = base + "/setup/index.html"
+	case "uninstall":
+		startURL = base + "/setup/uninstall.html"
+	}
+
+	fmt.Println(appName, appVersion, "·", publisher)
+	fmt.Println("mode:", mode)
+	fmt.Println("UI:", startURL)
+	if store != nil {
+		fmt.Println("DB:", store.DBPath())
+	}
+	fmt.Println(creditLine)
 
 	var browserCmd *exec.Cmd
 	if !*noBrowser {
-		cmd, err := openAppWindow(url)
+		cmd, err := openAppWindow(startURL, mode)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "браузер:", err)
 		} else if cmd != nil && cmd.Process != nil {
@@ -88,6 +117,88 @@ func main() {
 		_ = browserCmd.Process.Kill()
 	}
 	time.Sleep(100 * time.Millisecond)
+}
+
+func detectMode() string {
+	mode := "setup"
+	for _, a := range os.Args[1:] {
+		switch a {
+		case "--app", "-app":
+			mode = "app"
+		case "--setup", "-setup":
+			mode = "setup"
+		case "--uninstall", "-uninstall":
+			mode = "uninstall"
+		}
+	}
+	if mode == "setup" {
+		if exe, err := os.Executable(); err == nil {
+			if _, err := os.Stat(filepath.Join(filepath.Dir(exe), "installed.json")); err == nil {
+				mode = "app"
+			}
+		}
+	}
+	hasFlag := false
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "--app") || strings.HasPrefix(a, "--setup") || strings.HasPrefix(a, "--uninstall") ||
+			a == "-app" || a == "-setup" || a == "-uninstall" {
+			hasFlag = true
+			break
+		}
+	}
+	if !hasFlag && mode == "setup" {
+		if _, err := os.Stat("go.mod"); err == nil {
+			mode = "app"
+		}
+	}
+	return mode
+}
+
+func hasAppUI() bool {
+	_, err := webFS.Open("web/app/index.html")
+	return err == nil
+}
+
+func spaHandler(root fs.FS, mode string) http.Handler {
+	files := http.FileServer(http.FS(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && mode == "setup" {
+			http.Redirect(w, r, "/setup/index.html", http.StatusFound)
+			return
+		}
+		if r.URL.Path == "/" && mode == "uninstall" {
+			http.Redirect(w, r, "/setup/uninstall.html", http.StatusFound)
+			return
+		}
+		p := strings.TrimPrefix(r.URL.Path, "/")
+		if p == "" {
+			if !hasAppUI() {
+				http.Redirect(w, r, "/setup/index.html", http.StatusFound)
+				return
+			}
+			b, err := fs.ReadFile(root, "app/index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(b)
+			return
+		}
+		if _, err := fs.Stat(root, p); err == nil {
+			files.ServeHTTP(w, r)
+			return
+		}
+		if hasAppUI() && !strings.HasPrefix(r.URL.Path, "/setup") && !strings.HasPrefix(r.URL.Path, "/api") {
+			b, err := fs.ReadFile(root, "app/index.html")
+			if err == nil {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write(b)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	})
 }
 
 func withCORS(next http.Handler) http.Handler {

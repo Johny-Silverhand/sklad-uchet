@@ -163,3 +163,12 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   .sidebar-stats, .sidebar-foot, .sidebar-credit { display: none; }
   .row2 { grid-template-columns: 1fr; }
 }
+
+.toolbar > div:first-child { min-width: 160px; }
+.toolbar .muted { margin: 2px 0 0; font-size: .8rem; }
+.badge.theme { background: rgba(126,232,211,.1); color: #b7f5e8; font-weight: 500; }
+tr.theme-group td {
+  background: #0e151b; color: var(--accent); font-size: .82rem;
+  letter-spacing: .04em; padding: 8px 14px; border-bottom-color: rgba(126,232,211,.25);
+}
+.sidebar .nav-btn { font-size: .92rem; }

@@ -90,7 +90,7 @@ func (s *Store) ExportCSV(w io.Writer) error {
 	}
 	cw := csv.NewWriter(w)
 	cw.Comma = ';'
-	if err := cw.Write([]string{"id", "name", "kind", "quantity", "min_qty", "cell", "sku", "notes"}); err != nil {
+	if err := cw.Write([]string{"id", "name", "kind", "quantity", "min_qty", "cell", "sku", "notes", "storage", "theme"}); err != nil {
 		return err
 	}
 	items, err := s.List(ListFilter{})
@@ -98,6 +98,10 @@ func (s *Store) ExportCSV(w io.Writer) error {
 		return err
 	}
 	for _, it := range items {
+		theme := it.ThemeName
+		if it.ThemeID == nil {
+			theme = ""
+		}
 		if err := cw.Write([]string{
 			strconv.FormatInt(it.ID, 10),
 			it.Name,
@@ -107,6 +111,8 @@ func (s *Store) ExportCSV(w io.Writer) error {
 			it.Cell,
 			it.SKU,
 			it.Notes,
+			it.Storage,
+			theme,
 		}); err != nil {
 			return err
 		}
@@ -198,6 +204,35 @@ func (s *Store) ImportCSV(r io.Reader, updateExisting bool) (ImportResult, error
 		cell := col(row, "cell", "ячейка")
 		sku := col(row, "sku", "артикул")
 		notes := col(row, "notes", "заметки")
+		storage := col(row, "storage", "хранение")
+		switch strings.ToLower(storage) {
+		case "temporary", "временное", "temp":
+			storage = StorageTemporary
+		case "balance", "баланс", "постоянное", "":
+			storage = StorageBalance
+		}
+		if !validStorage(storage) {
+			storage = StorageBalance
+		}
+		themeName := col(row, "theme", "тема")
+		var themeID *int64
+		if themeName != "" && !strings.EqualFold(themeName, "Без темы") {
+			themes, _ := s.ListThemes()
+			for _, th := range themes {
+				if strings.EqualFold(th.Name, themeName) {
+					id := th.ID
+					themeID = &id
+					break
+				}
+			}
+			if themeID == nil {
+				th, err := s.CreateTheme(themeName, 0)
+				if err == nil {
+					id := th.ID
+					themeID = &id
+				}
+			}
+		}
 		idStr := col(row, "id")
 		if name == "" {
 			res.Skipped++
@@ -207,14 +242,15 @@ func (s *Store) ImportCSV(r io.Reader, updateExisting bool) (ImportResult, error
 		if !validKind(kind) {
 			kind = KindZapchast
 		}
+		in := UpsertInput{
+			Name: name, Kind: kind, Quantity: qty, MinQty: minQty,
+			Cell: cell, SKU: sku, Notes: notes, Storage: storage, ThemeID: themeID, Force: true,
+		}
 		if idStr != "" && updateExisting {
 			id, _ := strconv.ParseInt(idStr, 10, 64)
 			if id > 0 {
 				if _, err := s.Get(id); err == nil {
-					_, _, err := s.Update(id, UpsertInput{
-						Name: name, Kind: kind, Quantity: qty, MinQty: minQty,
-						Cell: cell, SKU: sku, Notes: notes, Force: true,
-					})
+					_, _, err := s.Update(id, in)
 					if err != nil {
 						res.Errors = append(res.Errors, fmt.Sprintf("строка %d: %v", i+1, err))
 						res.Skipped++
@@ -231,10 +267,7 @@ func (s *Store) ImportCSV(r io.Reader, updateExisting bool) (ImportResult, error
 		if updateExisting {
 			for _, d := range dups {
 				if strings.EqualFold(d.Cell, cell) || cell == "" {
-					_, _, err := s.Update(d.ID, UpsertInput{
-						Name: name, Kind: kind, Quantity: qty, MinQty: minQty,
-						Cell: cell, SKU: sku, Notes: notes, Force: true,
-					})
+					_, _, err := s.Update(d.ID, in)
 					if err != nil {
 						res.Errors = append(res.Errors, fmt.Sprintf("строка %d: %v", i+1, err))
 						res.Skipped++
@@ -249,10 +282,7 @@ func (s *Store) ImportCSV(r io.Reader, updateExisting bool) (ImportResult, error
 		if matched {
 			continue
 		}
-		_, _, err := s.Create(UpsertInput{
-			Name: name, Kind: kind, Quantity: qty, MinQty: minQty,
-			Cell: cell, SKU: sku, Notes: notes, Force: true,
-		})
+		_, _, err := s.Create(in)
 		if err != nil {
 			res.Errors = append(res.Errors, fmt.Sprintf("строка %d: %v", i+1, err))
 			res.Skipped++
